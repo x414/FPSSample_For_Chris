@@ -11,7 +11,7 @@ public static class RenderSettings
 {
     [ConfigVar(Name = "show.quality", DefaultValue = "0", Description = "Show quality setting debug overlay")]
     static ConfigVar showQuality;
-    [ConfigVar(Name = "r.quality", DefaultValue = "Ultra", Description = "Overall rendering quality", Flags = ConfigVar.Flags.Save)]
+    [ConfigVar(Name = "r.quality", DefaultValue = "Low", Description = "Overall rendering quality", Flags = ConfigVar.Flags.Save)]
     public static ConfigVar rQuality;
     [ConfigVar(Name = "r.vsync", DefaultValue = "1", Description = "Number of v-blanks to wait for each frame. 0 means no sync", Flags = ConfigVar.Flags.Save)]
     public static ConfigVar rVSync;
@@ -25,11 +25,11 @@ public static class RenderSettings
     public static ConfigVar rBloom;
     [ConfigVar(Name = "r.motionblur", DefaultValue = "1", Description = "Enable motion blur", Flags = ConfigVar.Flags.Save)]
     public static ConfigVar rMotionBlur;
-    [ConfigVar(Name = "r.ssao", DefaultValue = "1", Description = "Enable ssao", Flags = ConfigVar.Flags.Save)]
+    [ConfigVar(Name = "r.ssao", DefaultValue = "0", Description = "Enable ssao", Flags = ConfigVar.Flags.Save)]
     public static ConfigVar rSSAO;
     [ConfigVar(Name = "r.grain", DefaultValue = "1", Description = "Enable grain", Flags = ConfigVar.Flags.Save)]
     public static ConfigVar rGrain;
-    [ConfigVar(Name = "r.ssr", DefaultValue = "1", Description = "Enable screen space reflections", Flags = ConfigVar.Flags.Save)]
+    [ConfigVar(Name = "r.ssr", DefaultValue = "0", Description = "Enable screen space reflections", Flags = ConfigVar.Flags.Save)]
     public static ConfigVar rSSR;
     [ConfigVar(Name = "r.sss", DefaultValue = "1", Description = "Enable subsurface scattering", Flags = ConfigVar.Flags.Save)]
     public static ConfigVar rSSS;
@@ -43,7 +43,7 @@ public static class RenderSettings
     public static ConfigVar rDecalDist;
     [ConfigVar(Name = "r.gamma", DefaultValue = "1", Description = "User gamma correction", Flags = ConfigVar.Flags.Save)]
     public static ConfigVar rGamma;
-    [ConfigVar(Name = "r.resolution", DefaultValue = "", Description = "Screen resolution", Flags = ConfigVar.Flags.Save)]
+    [ConfigVar(Name = "r.resolution", DefaultValue = "1280x720", Description = "Screen resolution", Flags = ConfigVar.Flags.Save)]
     public static ConfigVar rResolution;
     [ConfigVar(Name = "r.latesync", DefaultValue = "1", Description = "Sync with render thread late", Flags = ConfigVar.Flags.None)]
     public static ConfigVar rLateSync;
@@ -343,3 +343,4 @@ public static class RenderSettings
     }
 
 }
+
