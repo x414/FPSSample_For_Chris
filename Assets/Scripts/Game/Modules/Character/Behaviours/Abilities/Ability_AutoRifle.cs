@@ -185,8 +185,10 @@ class AutoRifle_RequestActive : BaseComponentDataSystem<CharBehaviour,AbilityCon
 	protected override void Update(Entity entity, CharBehaviour charAbility, AbilityControl abilityCtrl, 
 		Ability_AutoRifle.PredictedState predictedState, Ability_AutoRifle.Settings settings)
 	{
-		if (abilityCtrl.behaviorState == AbilityControl.State.Active || abilityCtrl.behaviorState == AbilityControl.State.Cooldown)
-			return;
+        if (abilityCtrl.behaviorState == AbilityControl.State.Active || abilityCtrl.behaviorState == AbilityControl.State.Cooldown)
+            return;
+        if (!CharacterBehaviours.IsValidCharacter(EntityManager, charAbility.character))
+            return;
 		
 		var command = EntityManager.GetComponentData<UserCommandComponentData>(charAbility.character).command;
 		var request = Ability_AutoRifle.GetPreferredState(ref predictedState, ref settings, ref command);
@@ -211,6 +213,8 @@ class AutoRifle_Update : BaseComponentDataSystem<CharBehaviour,AbilityControl,Ab
 	{
 		// Decrease cone
 		if (predictedState.action != Ability_AutoRifle.State.Fire)
+        if (!CharacterBehaviours.IsValidCharacter(EntityManager, charAbility.character))
+            return;
 		{
 			predictedState.COF -= settings.COFDecreaseVel * m_world.worldTime.tickDuration;
 			if (predictedState.COF < settings.minCOF)
@@ -351,7 +355,7 @@ class AutoRifle_Update : BaseComponentDataSystem<CharBehaviour,AbilityControl,Ab
 //            Debug.DrawRay(rayStart, direction * 1000, Color.green, 1.0f);
 
 			const int distance = 500;
-			var collisionMask = ~(1U << character.teamId);
+            var collisionMask = ~0U;
 
 			var queryReciever = World.GetExistingManager<RaySphereQueryReciever>();
 			internalState.rayQueryId = queryReciever.RegisterQuery(new RaySphereQueryReciever.Query()

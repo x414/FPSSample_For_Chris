@@ -548,6 +548,10 @@ public class ClientProjectileFactory
 
     public void DestroyClientProjectile(Entity clientProjectileEntity, EntityCommandBuffer commandBuffer)
     {
+        if (clientProjectileEntity == Entity.Null || !m_entityManager.Exists(clientProjectileEntity) ||
+            !m_entityManager.HasComponent<ClientProjectile>(clientProjectileEntity))
+            return;
+
         var clientProjectile = m_entityManager.GetComponentObject<ClientProjectile>(clientProjectileEntity);
         
         Free(pools[clientProjectile.poolIndex], clientProjectile.bufferIndex);

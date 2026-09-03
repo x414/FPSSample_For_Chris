@@ -3,6 +3,13 @@ using Unity.Entities;
 
 public class CharacterBehaviours   
 {
+    public static bool IsValidCharacter(EntityManager entityManager, Entity character)
+    {
+        return character != Entity.Null && entityManager.Exists(character) &&
+            entityManager.HasComponent<CharacterPredictedData>(character) &&
+            entityManager.HasComponent<UserCommandComponentData>(character);
+    }
+
     public static void CreateHandleSpawnSystems(GameWorld world,SystemCollection systems, BundledResourceManager resourceManager, bool server)
     {        
         systems.Add(world.GetECSWorld().CreateManager<HandleCharacterSpawn>(world, resourceManager, server)); // TODO (mogensh) needs to be done first as it creates presentation

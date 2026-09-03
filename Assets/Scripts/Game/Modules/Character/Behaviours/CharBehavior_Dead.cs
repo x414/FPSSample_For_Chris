@@ -38,9 +38,12 @@ class Dead_RequestActive : BaseComponentDataSystem<CharBehaviour,AbilityControl,
         if (abilityCtrl.behaviorState == AbilityControl.State.Active || abilityCtrl.behaviorState == AbilityControl.State.Cooldown)
             return;
 
-        if (abilityCtrl.active == 0)
-        {
-            var healthState = EntityManager.GetComponentData<HealthStateData>(charAbility.character);
+       if (abilityCtrl.active == 0)
+       {
+            if (!EntityManager.Exists(charAbility.character) || !EntityManager.HasComponent<HealthStateData>(charAbility.character))
+                return;
+
+           var healthState = EntityManager.GetComponentData<HealthStateData>(charAbility.character);
             if (healthState.health <= 0)
             {
                 abilityCtrl.behaviorState = AbilityControl.State.RequestActive;
@@ -65,6 +68,8 @@ class Dead_Update : BaseComponentDataSystem<CharBehaviour, AbilityControl, CharB
         if (abilityCtrl.active == 0)
             return;
 
+        if (!CharacterBehaviours.IsValidCharacter(EntityManager, charAbility.character))
+            return;
         if (abilityCtrl.behaviorState != AbilityControl.State.Active)
         {
             abilityCtrl.behaviorState = AbilityControl.State.Active;

@@ -129,6 +129,8 @@ class GrenadeLauncher_RequestActive : BaseComponentDataSystem<CharBehaviour,Abil
     {
         if (abilityCtrl.behaviorState == AbilityControl.State.Active || abilityCtrl.behaviorState == AbilityControl.State.Cooldown)
             return;
+        if (!CharacterBehaviours.IsValidCharacter(EntityManager, charAbility.character))
+            return;
 		
         var command = EntityManager.GetComponentData<UserCommandComponentData>(charAbility.character).command;
         abilityCtrl.behaviorState = command.buttons.IsSet(settings.activateButton) ?  
@@ -149,13 +151,14 @@ class GrenadeLauncher_Update : BaseComponentDataSystem<AbilityControl,Ability_Gr
     protected override void Update(Entity entity, AbilityControl abilityCtrl, Ability_GrenadeLauncher.PredictedState predictedState, Ability_GrenadeLauncher.Settings state)
     {
         var time = m_world.worldTime;
-        
         switch (predictedState.phase)
         {
             case Ability_GrenadeLauncher.Phase.Idle:
                 if (abilityCtrl.active == 1)
                 {
                     var charAbility = EntityManager.GetComponentData<CharBehaviour>(entity);
+                    if (!CharacterBehaviours.IsValidCharacter(EntityManager, charAbility.character))
+                        return;
                     var charPredictedState = EntityManager.GetComponentData<CharacterPredictedData>(charAbility.character);
                     var character = EntityManager.GetComponentObject<Character>(charAbility.character);
                     

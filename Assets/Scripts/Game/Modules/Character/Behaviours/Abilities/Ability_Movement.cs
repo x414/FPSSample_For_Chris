@@ -39,6 +39,8 @@ class Movement_RequestActive : BaseComponentDataSystem<CharBehaviour,AbilityCont
     {
         if (abilityCtrl.behaviorState == AbilityControl.State.Active || abilityCtrl.behaviorState == AbilityControl.State.Cooldown)
             return;
+        if (!CharacterBehaviours.IsValidCharacter(EntityManager, charAbility.character))
+            return;
 
         if (abilityCtrl.active == 0 && abilityCtrl.behaviorState != AbilityControl.State.RequestActive)
         {
@@ -91,7 +93,9 @@ class Movement_Update : BaseComponentDataSystem<CharBehaviour, AbilityControl, A
         
         
         var time = m_world.worldTime;
-       
+
+        if (!CharacterBehaviours.IsValidCharacter(EntityManager, charAbility.character))
+            return;
         var command = EntityManager.GetComponentData<UserCommandComponentData>(charAbility.character).command;
         var predictedState = EntityManager.GetComponentData<CharacterPredictedData>(charAbility.character);
         var character = EntityManager.GetComponentObject<Character>(charAbility.character);
@@ -309,7 +313,9 @@ class Movement_HandleCollision : BaseComponentDataSystem<CharBehaviour, AbilityC
         if (abilityCtrl.active == 0)
             return;
 
-        
+       
+        if (!CharacterBehaviours.IsValidCharacter(EntityManager, charAbility.character))
+            return;
         var time = m_world.worldTime;
         var predictedState = EntityManager.GetComponentData<CharacterPredictedData>(charAbility.character);
         var query = EntityManager.GetComponentObject<CharacterMoveQuery>(charAbility.character);

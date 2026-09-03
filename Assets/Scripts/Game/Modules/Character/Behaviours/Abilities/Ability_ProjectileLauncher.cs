@@ -112,6 +112,8 @@ class ProjectileLauncher_RequestActive : BaseComponentDataSystem<CharBehaviour,A
     {
         if (abilityCtrl.behaviorState == AbilityControl.State.Active || abilityCtrl.behaviorState == AbilityControl.State.Cooldown)
             return;
+        if (!CharacterBehaviours.IsValidCharacter(EntityManager, charAbility.character))
+            return;
 		
         var command = EntityManager.GetComponentData<UserCommandComponentData>(charAbility.character).command;
         abilityCtrl.behaviorState = command.buttons.IsSet(settings.activateButton) ?  
@@ -140,6 +142,8 @@ class ProjectileLauncher_Update : BaseComponentDataSystem<AbilityControl,Ability
                 if (abilityCtrl.active == 1)
                 {
                     var charAbility = EntityManager.GetComponentData<CharBehaviour>(entity);
+                    if (!CharacterBehaviours.IsValidCharacter(EntityManager, charAbility.character))
+                        return;
                     var character = EntityManager.GetComponentObject<Character>(charAbility.character);
                     var charPredictedState = EntityManager.GetComponentData<CharacterPredictedData>(charAbility.character);
                     

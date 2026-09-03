@@ -39,10 +39,14 @@ public class UpdatePlayerCameras : BaseComponentSystem
         var playerCameraArray = Group.GetComponentArray<PlayerCamera>();
         for (var i = 0; i < cameraArray.Length; i++)
         {
-            var camera = cameraArray[i];
-            var playerCamera = playerCameraArray[i];
-            var settings = playerCamera.cameraSettings;
-            var enabled = settings.isEnabled;
+           var camera = cameraArray[i];
+           var playerCamera = playerCameraArray[i];
+           var settings = playerCamera.cameraSettings;
+            if (camera == null || playerCamera == null || settings == null)
+           {
+               continue;
+           }
+           var enabled = settings.isEnabled;
             var isActive = camera.gameObject.activeSelf;
             if (!enabled)
             {

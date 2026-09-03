@@ -160,6 +160,8 @@ class Chaingun_RequestActive : BaseComponentDataSystem<CharBehaviour,AbilityCont
     {
         if (abilityCtrl.behaviorState == AbilityControl.State.Active || abilityCtrl.behaviorState == AbilityControl.State.Cooldown)
             return;
+        if (!CharacterBehaviours.IsValidCharacter(EntityManager, charAbility.character))
+            return;
         
         var command = EntityManager.GetComponentData<UserCommandComponentData>(charAbility.character).command;
         var request = Ability_Chaingun.GetPreferredState(ref predictedState, ref settings, ref command);
@@ -181,6 +183,8 @@ class Chaingun_Update : BaseComponentDataSystem<CharBehaviour, AbilityControl,Ab
     {
         var time = m_world.worldTime;
 
+        if (!CharacterBehaviours.IsValidCharacter(EntityManager, charAbility.character))
+            return;
         // Adjust fire rate
         if (predictedState.state == Ability_Chaingun.State.Fire)
         {

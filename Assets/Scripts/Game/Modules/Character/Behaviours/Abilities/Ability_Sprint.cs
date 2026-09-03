@@ -79,8 +79,10 @@ class Sprint_RequestActive : BaseComponentDataSystem<CharBehaviour,AbilityContro
 	protected override void Update(Entity entity, CharBehaviour charAbility, AbilityControl abilityCtrl, 
 		Ability_Sprint.PredictedState predictedState, Ability_Sprint.Settings settings)
 	{
-		if (abilityCtrl.behaviorState == AbilityControl.State.Active || abilityCtrl.behaviorState == AbilityControl.State.Cooldown)
-			return;
+        if (abilityCtrl.behaviorState == AbilityControl.State.Active || abilityCtrl.behaviorState == AbilityControl.State.Cooldown)
+            return;
+        if (!CharacterBehaviours.IsValidCharacter(EntityManager, charAbility.character))
+            return;
 		
 		var command = EntityManager.GetComponentData<UserCommandComponentData>(charAbility.character).command;
 		abilityCtrl.behaviorState = command.buttons.IsSet(settings.activateButton) ?  
@@ -105,6 +107,8 @@ class Sprint_Update : BaseComponentDataSystem<CharBehaviour, AbilityControl, Abi
 		{
 			return;
 		}
+        if (!CharacterBehaviours.IsValidCharacter(EntityManager, charAbility.character))
+            return;
 			
 		var charPredictedState = EntityManager.GetComponentData<CharacterPredictedData>(charAbility.character);
 

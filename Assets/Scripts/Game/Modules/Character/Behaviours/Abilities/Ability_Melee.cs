@@ -132,6 +132,8 @@ class Melee_RequestActive : BaseComponentDataSystem<CharBehaviour,AbilityControl
     {
         if (abilityCtrl.behaviorState == AbilityControl.State.Active || abilityCtrl.behaviorState == AbilityControl.State.Cooldown)
             return;
+        if (!CharacterBehaviours.IsValidCharacter(EntityManager, charAbility.character))
+            return;
 		
         var command = EntityManager.GetComponentData<UserCommandComponentData>(charAbility.character).command;
         abilityCtrl.behaviorState = command.buttons.IsSet(settings.activateButton) ?  
@@ -155,6 +157,8 @@ class Melee_Update : BaseComponentDataSystem<CharBehaviour,AbilityControl, Abili
     {
         var time = m_world.worldTime;
 
+        if (!CharacterBehaviours.IsValidCharacter(EntityManager, charAbility.character))
+            return;
         if (abilityCtrl.active == 0)
         {
             if(predictedState.phase != Ability_Melee.Phase.Idle)

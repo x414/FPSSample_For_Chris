@@ -133,6 +133,8 @@ class RocketJump_RequestActive : BaseComponentDataSystem<CharBehaviour,AbilityCo
     {
         if (abilityCtrl.behaviorState == AbilityControl.State.Active || abilityCtrl.behaviorState == AbilityControl.State.Cooldown)
             return;
+        if (!CharacterBehaviours.IsValidCharacter(EntityManager, charAbility.character))
+            return;
 		
         var command = EntityManager.GetComponentData<UserCommandComponentData>(charAbility.character).command;
         abilityCtrl.behaviorState = command.buttons.IsSet(settings.activateButton) ?  
@@ -157,6 +159,8 @@ class RocketJump_Update : BaseComponentDataSystem<CharBehaviour,AbilityControl, 
     {
         var time = m_world.worldTime;
 
+        if (!CharacterBehaviours.IsValidCharacter(EntityManager, charAbility.character))
+            return;
         if (abilityCtrl.active == 0)
         {
             if(predictedState.phase != Ability_RocketJump.Phase.Idle)

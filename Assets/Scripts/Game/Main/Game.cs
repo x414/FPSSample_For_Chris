@@ -341,7 +341,7 @@ public class Game : MonoBehaviour
             engineLogFileLocation = System.IO.Path.GetDirectoryName(commandLineArgs[logfileArgIdx + 1]);
         }
 
-        var logName = m_isHeadless ? "game_"+DateTime.UtcNow.ToString("yyyyMMdd_HHmmss_fff") : "game";
+        var logName = "game_" + DateTime.UtcNow.ToString("yyyyMMdd_HHmmss_fff");
         GameDebug.Init(engineLogFileLocation, logName);
 
         ConfigVar.Init();
@@ -427,6 +427,7 @@ public class Game : MonoBehaviour
 
         // Game loops
         Console.AddCommand("preview", CmdPreview, "Start preview mode");
+        Console.AddCommand("chris", CmdChris, "Start single player mode for kids");
         Console.AddCommand("serve", CmdServe, "Start server listening");
         Console.AddCommand("client", CmdClient, "client: Enter client mode.");
         Console.AddCommand("thinclient", CmdThinClient, "client: Enter thin client mode.");
@@ -757,6 +758,14 @@ public class Game : MonoBehaviour
         Console.s_PendingCommandsWaitForFrames = 1;
     }
 
+    void CmdChris(string[] args)
+    {
+        m_ErrorState = false;
+        Console.SetOpen(false);
+        RequestGameLoop(typeof(SinglePlayerGameLoop), args);
+        Console.s_PendingCommandsWaitForFrames = 1;
+    }
+
     void CmdServe(string[] args)
     {
         RequestGameLoop( typeof(ServerGameLoop) , args);
@@ -919,7 +928,7 @@ public class Game : MonoBehaviour
     void WindowFocusUpdate()
     {
         bool menusShowing = (clientFrontend != null && clientFrontend.menuShowing != ClientFrontend.MenuShowing.None);
-        bool lockWhenClicked = !menusShowing && !Console.IsOpen();
+        bool lockWhenClicked = !menusShowing && !Console.IsOpen() && !SinglePlayerResultUI.IsShowing;
 
         if(s_bMouseLockFrameNo == Time.frameCount)
         {
@@ -965,3 +974,4 @@ public class Game : MonoBehaviour
 
     static int s_bMouseLockFrameNo;
 }
+

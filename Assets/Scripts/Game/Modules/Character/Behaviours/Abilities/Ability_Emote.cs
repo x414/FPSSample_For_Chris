@@ -70,8 +70,10 @@ class Emote_RequestActive : BaseComponentDataSystem<CharBehaviour,AbilityControl
 	protected override void Update(Entity entity, CharBehaviour charAbility, AbilityControl abilityCtrl, 
 		Ability_Emote.InternalState internalState)
 	{
-		if (abilityCtrl.behaviorState == AbilityControl.State.Active || abilityCtrl.behaviorState == AbilityControl.State.Cooldown)
-			return;
+        if (abilityCtrl.behaviorState == AbilityControl.State.Active || abilityCtrl.behaviorState == AbilityControl.State.Cooldown)
+            return;
+        if (!CharacterBehaviours.IsValidCharacter(EntityManager, charAbility.character))
+            return;
 		
 		var command = EntityManager.GetComponentData<UserCommandComponentData>(charAbility.character).command;
 		abilityCtrl.behaviorState = command.emote != CharacterEmote.None ?  
@@ -101,6 +103,8 @@ class Emote_Update : BaseComponentDataSystem<CharBehaviour, AbilityControl, Abil
 		}
 
 		// Cancel if moving or requested 
+		if (!CharacterBehaviours.IsValidCharacter(EntityManager, charAbility.character))
+			return;
 		var command = EntityManager.GetComponentData<UserCommandComponentData>(charAbility.character).command;
 		var moving = command.moveMagnitude > 0; 
 		if( moving)
