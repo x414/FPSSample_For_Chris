@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using Unity.Entities;
 using Unity.Mathematics;
@@ -69,6 +70,8 @@ public class SinglePlayerGameLoop : Game.IGameLoop
     SinglePlayerHudUI m_HudUI;
     Vector3 m_SpawnCenter;
     SinglePlayerResultUI m_ResultUI;
+    readonly List<Vector3> m_RobotSpawnPositions = new List<Vector3>();
+    int m_RobotSpawnPositionIndex;
 
    bool m_GameOver;
    bool m_GameplayStarted;
@@ -341,13 +344,23 @@ public class SinglePlayerGameLoop : Game.IGameLoop
         m_TimerManager = new TimerManager(15f);
 
         m_SpawnCenter = Vector3.zero;
+        m_RobotSpawnPositions.Clear();
+        m_RobotSpawnPositionIndex = 0;
         foreach (var spawnPoint in Object.FindObjectsOfType<SpawnPoint>())
         {
             if (spawnPoint.teamIndex == m_Player.teamIndex)
             {
                 m_SpawnCenter = spawnPoint.transform.position;
-                break;
             }
+            else
+            {
+                m_RobotSpawnPositions.Add(spawnPoint.transform.position);
+            }
+        }
+
+        if (m_RobotSpawnPositions.Count == 0)
+        {
+            m_RobotSpawnPositions.Add(m_SpawnCenter);
         }
 
         if (m_SpawnCenter == Vector3.zero)
@@ -405,15 +418,17 @@ public class SinglePlayerGameLoop : Game.IGameLoop
 
     Vector3 ResolveRobotSpawnPosition(Vector3 position)
     {
-        var rayOrigin = position + Vector3.up * 4f;
+        var rayOrigin = position + Vector3.up * 12f;
         RaycastHit hit;
-        if (Physics.Raycast(rayOrigin, Vector3.down, out hit, 30f, Physics.DefaultRaycastLayers,
+        if (Physics.Raycast(rayOrigin, Vector3.down, out hit, 1000f, Physics.DefaultRaycastLayers,
             QueryTriggerInteraction.Ignore))
         {
             return hit.point + Vector3.up * 0.2f;
         }
 
-        return m_SpawnCenter + Vector3.up * 0.2f;
+        var candidate = m_RobotSpawnPositions[m_RobotSpawnPositionIndex % m_RobotSpawnPositions.Count];
+        m_RobotSpawnPositionIndex++;
+        return candidate + Vector3.up * 0.2f;
     }
 
     void OnPlayerHit(float damage)

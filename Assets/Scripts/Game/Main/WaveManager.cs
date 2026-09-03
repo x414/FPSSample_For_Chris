@@ -9,12 +9,23 @@ public class WaveManager
     public int waveKilledEnemies { get; private set; }
     public float waveBreakTimer { get; private set; }
     public int enemiesAlive => m_AliveRobots.Count;
+    int maxActiveRobots => Mathf.Max(1, m_Config.maxActiveRobots);
+
+    struct RobotSpawnRequest
+    {
+        public RobotType type;
+        public float angle;
+        public float entryDist;
+        public float spawnDist;
+    }
 
     List<AIController> m_AliveRobots = new List<AIController>();
+    List<RobotSpawnRequest> m_PendingRobots = new List<RobotSpawnRequest>();
     List<AIController> m_DeadRobots = new List<AIController>();
     DifficultyConfig m_Config;
     Vector3 m_SpawnCenter;
     float m_WaveBreakDuration = 5f;
+    float m_SpawnCooldown;
     float m_AnnouncementTimer;
     System.Action<AIController> m_OnRobotKilled;
     System.Action<AIController, Vector3> m_CreateRobotEntity;
@@ -50,7 +61,12 @@ public class WaveManager
                 }
             }
 
-            if (m_AliveRobots.Count == 0)
+            if (m_SpawnCooldown > 0f)
+                m_SpawnCooldown -= deltaTime;
+
+            SpawnQueuedRobots();
+
+            if (m_AliveRobots.Count == 0 && m_PendingRobots.Count == 0)
             {
                isWaveActive = false;
                waveBreakTimer = m_WaveBreakDuration;
@@ -87,28 +103,64 @@ public class WaveManager
        currentWave++;
        isWaveActive = true;
        m_AnnouncementTimer = 3f;
-       int count = m_Config.baseEnemiesPerWave + currentWave - 1;
-       int a2Count = currentWave >= 3 ? Mathf.FloorToInt(currentWave / 2) : 0;
-       int a1Count = count - a2Count;
+       int baseCount = m_Config.baseEnemiesPerWave + currentWave - 1;
+       int baseA2Count = currentWave >= 3 ? Mathf.FloorToInt(currentWave / 2) : 0;
+       int a2Count = Mathf.Min(baseCount - 1, Mathf.CeilToInt(baseA2Count * m_Config.enemyCountMultiplier));
+       int a1Count = Mathf.CeilToInt((baseCount - baseA2Count) * m_Config.enemyCountMultiplier);
         waveTotalEnemies = a1Count + a2Count;
         waveKilledEnemies = 0;
+       m_PendingRobots.Clear();
+       m_SpawnCooldown = 0f;
 
         for (int i = 0; i < a1Count; i++)
-            SpawnRobot(RobotType.A1_Infantry);
+            m_PendingRobots.Add(new RobotSpawnRequest
+            {
+                type = RobotType.A1_Infantry,
+                angle = Random.Range(0f, Mathf.PI * 2f) + i * 2.4f,
+                entryDist = Random.Range(3f, 8f),
+                spawnDist = Random.Range(20f, 32f)
+            });
 
         for (int i = 0; i < a2Count; i++)
-            SpawnRobot(RobotType.A2_Hunter);
+            m_PendingRobots.Add(new RobotSpawnRequest
+            {
+                type = RobotType.A2_Hunter,
+                angle = Random.Range(0f, Mathf.PI * 2f) + (a1Count + i) * 2.4f,
+                entryDist = Random.Range(3f, 8f),
+                spawnDist = Random.Range(20f, 32f)
+            });
+
+        SpawnQueuedRobots();
 
         GameDebug.Log($"Wave {currentWave} started! A1:{a1Count} A2:{a2Count}");
     }
 
-    void SpawnRobot(RobotType type)
+    void SpawnRobot(RobotSpawnRequest request)
     {
-        var angle = Random.Range(0f, Mathf.PI * 2f);
-        var dist = Random.Range(6f, 12f);
-        var pos = m_SpawnCenter + new Vector3(Mathf.Cos(angle) * dist, 0.1f, Mathf.Sin(angle) * dist);
-        var robot = new AIController(type, m_Config, pos);
+        var angle = request.angle;
+        var entryDist = request.entryDist;
+        var spawnDist = request.spawnDist;
+        var direction = new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle));
+        var entryTarget = m_SpawnCenter + direction * entryDist;
+        var pos = m_SpawnCenter + direction * spawnDist;
+        pos.y = 0.1f;
+        var robot = new AIController(request.type, m_Config, pos);
         m_AliveRobots.Add(robot);
         m_CreateRobotEntity?.Invoke(robot, pos);
+        robot.BeginEntry(entryTarget);
+    }
+
+    void SpawnQueuedRobots()
+    {
+        if (m_SpawnCooldown > 0f) return;
+
+        while (m_PendingRobots.Count > 0 && m_AliveRobots.Count < maxActiveRobots)
+        {
+            var request = m_PendingRobots[0];
+            m_PendingRobots.RemoveAt(0);
+            SpawnRobot(request);
+        }
+
+        m_SpawnCooldown = m_Config.robotSpawnCooldown;
     }
 }

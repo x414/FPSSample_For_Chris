@@ -18,6 +18,9 @@ public class DifficultyConfig
     public int playerMaxHealth = 100;
     public float powerupSpawnInterval = 40f;
     public int maxLives = 4;
+    public int maxActiveRobots = 2;
+    public float robotSpawnCooldown = 1.0f;
+    public float enemyCountMultiplier = 2.0f;
 
     public static DifficultyConfig GetConfig(string difficulty)
     {
@@ -31,7 +34,9 @@ public class DifficultyConfig
                 config.hitChance = 0.2f;
                 config.baseEnemiesPerWave = 2;
                 config.robotHealthMultiplier = 0.5f;
-                config.totalRobots = 5;
+                config.totalRobots = 10;
+                config.maxActiveRobots = 1;
+                config.robotSpawnCooldown = 1.2f;
                 config.detectionRadius = 30f;
                 config.playerHealthRegen = 10f;
                 config.playerMaxHealth = 200;
@@ -44,7 +49,9 @@ public class DifficultyConfig
                 config.hitChance = 0.6f;
                 config.baseEnemiesPerWave = 4;
                 config.robotHealthMultiplier = 1.5f;
-                config.totalRobots = 12;
+                config.totalRobots = 24;
+                config.maxActiveRobots = 2;
+                config.robotSpawnCooldown = 0.6f;
                 config.detectionRadius = 40f;
                 config.playerHealthRegen = 2f;
                 config.playerMaxHealth = 100;

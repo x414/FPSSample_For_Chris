@@ -11,6 +11,7 @@ public enum RobotType
 public enum AIState
 {
     Idle,
+    Enter,
     Patrol,
     Chase,
     Attack,
@@ -31,6 +32,8 @@ public class AIController
     Quaternion m_Rotation;
     float m_ShootTimer;
     float m_PatrolTimer;
+    float m_EntryTimer;
+    Vector3 m_EntryTarget;
     float m_MoveSpeed;
     float m_ShootInterval;
     float m_HitChance;
@@ -56,7 +59,7 @@ public class AIController
     public AIController(RobotType type, DifficultyConfig config, Vector3 spawnPos)
     {
         robotType = type;
-        state = AIState.Idle;
+        state = AIState.Enter;
         m_Position = spawnPos;
         m_PatrolOrigin = spawnPos;
         m_MoveSpeed = config.robotMoveSpeed;
@@ -81,6 +84,17 @@ public class AIController
         m_FireThisTick = false;
         switch (state)
         {
+            case AIState.Enter:
+                m_EntryTimer += deltaTime;
+                MoveTowards(m_EntryTarget, deltaTime);
+                if (Vector3.Distance(m_Position, m_EntryTarget) < 1.2f || m_EntryTimer >= 12f)
+                {
+                    state = AIState.Patrol;
+                    m_PatrolOrigin = m_EntryTarget;
+                    m_HasPatrolTarget = false;
+                }
+                break;
+
             case AIState.Idle:
                 state = AIState.Patrol;
                 break;
@@ -138,6 +152,18 @@ public class AIController
         m_TargetPosition = position;
         m_Rotation = Quaternion.identity;
         m_HasPatrolTarget = false;
+    }
+
+    public void BeginEntry(Vector3 battlefieldPosition)
+    {
+        battlefieldPosition.y = m_Position.y;
+        m_EntryTarget = battlefieldPosition;
+        m_TargetPosition = battlefieldPosition;
+        m_PatrolOrigin = battlefieldPosition;
+        m_PatrolTarget = battlefieldPosition;
+        m_HasPatrolTarget = true;
+        m_EntryTimer = 0f;
+        state = AIState.Enter;
     }
 
     public void UpdateEntity(GameWorld world)
@@ -248,7 +274,8 @@ public class AIController
 
     void UpdateDesiredMovement(Vector3 playerPos, float distToPlayer)
     {
-        Vector3 target = state == AIState.Attack ? playerPos : m_PatrolTarget;
+        Vector3 target = state == AIState.Attack ? playerPos :
+            state == AIState.Enter ? m_EntryTarget : m_PatrolTarget;
         Vector3 direction = target - m_Position;
         direction.y = 0f;
 
