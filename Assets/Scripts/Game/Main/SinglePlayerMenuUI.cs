@@ -6,11 +6,14 @@ using UnityEngine.UI;
 public class SinglePlayerMenuUI : MonoBehaviour
 {
     Action<SinglePlayerGameLoop.Mode, SinglePlayerGameLoop.Difficulty> m_OnStart;
+    DailyPlayTimeTracker m_PlayTimeTracker;
     Button[] m_ModeButtons;
     Button[] m_DifficultyButtons;
     Button m_StartButton;
+    Text m_PlayTimeText;
     int m_ModeIndex;
     int m_DifficultyIndex = 0;
+    bool m_StartLocked;
 
     readonly string[] m_ModeNames = { "Wave", "Explore" };
     readonly string[] m_DifficultyNames = { "Easy", "Normal", "Hard" };
@@ -36,7 +39,7 @@ public class SinglePlayerMenuUI : MonoBehaviour
         }
 
         var font = Resources.GetBuiltinResource<Font>("Arial.ttf");
-        var panel = CreatePanel(canvasObject.transform, new Vector2(0f, 0f), new Vector2(520f, 420f), new Color(0f, 0f, 0f, 0.75f));
+        var panel = CreatePanel(canvasObject.transform, new Vector2(0f, 0f), new Vector2(520f, 500f), new Color(0f, 0f, 0f, 0.75f));
         CreateText(panel.transform, "Single Player", 36, TextAnchor.UpperCenter, new Vector2(0f, 155f), new Vector2(460f, 50f), Color.white, font);
         CreateText(panel.transform, "Mode", 24, TextAnchor.MiddleLeft, new Vector2(0f, 90f), new Vector2(440f, 32f), Color.white, font);
 
@@ -66,6 +69,7 @@ public class SinglePlayerMenuUI : MonoBehaviour
         }
 
         m_StartButton = CreateButton(panel.transform, "Start Game", new Vector2(0f, -160f), new Vector2(360f, 70f), font, StartGame);
+        m_PlayTimeText = CreateText(panel.transform, "", 21, TextAnchor.MiddleCenter, new Vector2(0f, -215f), new Vector2(440f, 32f), new Color(0.95f, 0.9f, 0.7f), font);
         UpdateSelectionColors();
     }
 
@@ -79,6 +83,13 @@ public class SinglePlayerMenuUI : MonoBehaviour
     void Update()
     {
         Game.SetMousePointerLock(false);
+
+        if (m_PlayTimeTracker != null)
+        {
+            m_PlayTimeText.text = m_PlayTimeTracker.GetStatusText();
+            if (m_PlayTimeTracker.IsLimitReached && !m_StartLocked)
+                LockForDailyLimit();
+        }
 
         if (Input.GetKeyDown(KeyCode.LeftArrow) && m_ModeIndex > 0)
         {
@@ -108,9 +119,17 @@ public class SinglePlayerMenuUI : MonoBehaviour
             StartGame();
     }
 
-    public void Initialize(Action<SinglePlayerGameLoop.Mode, SinglePlayerGameLoop.Difficulty> onStart)
+    public void Initialize(Action<SinglePlayerGameLoop.Mode, SinglePlayerGameLoop.Difficulty> onStart,
+        DailyPlayTimeTracker playTimeTracker)
     {
         m_OnStart = onStart;
+        m_PlayTimeTracker = playTimeTracker;
+        if (m_PlayTimeTracker != null)
+        {
+            m_PlayTimeText.text = m_PlayTimeTracker.GetStatusText();
+            if (m_PlayTimeTracker.IsLimitReached)
+                LockForDailyLimit();
+        }
     }
 
     void UpdateSelectionColors()
@@ -122,8 +141,31 @@ public class SinglePlayerMenuUI : MonoBehaviour
             m_DifficultyButtons[i].image.color = i == m_DifficultyIndex ? new Color(0.2f, 0.6f, 0.2f) : new Color(0.15f, 0.15f, 0.2f);
     }
 
+    void LockForDailyLimit()
+    {
+        m_StartLocked = true;
+        m_StartButton.interactable = false;
+        m_StartButton.image.color = new Color(0.22f, 0.22f, 0.26f);
+        m_PlayTimeText.text = m_PlayTimeTracker != null ? m_PlayTimeTracker.GetLimitMessage() : string.Empty;
+
+        foreach (var button in m_ModeButtons)
+        {
+            button.interactable = false;
+            button.image.color = new Color(0.15f, 0.15f, 0.2f);
+        }
+
+        foreach (var button in m_DifficultyButtons)
+        {
+            button.interactable = false;
+            button.image.color = new Color(0.15f, 0.15f, 0.2f);
+        }
+    }
+
     void StartGame()
     {
+        if (m_StartLocked || m_PlayTimeTracker != null && m_PlayTimeTracker.IsLimitReached)
+            return;
+
         Console.SetOpen(false);
         if (m_OnStart != null)
             m_OnStart((SinglePlayerGameLoop.Mode)m_ModeIndex, (SinglePlayerGameLoop.Difficulty)m_DifficultyIndex);
@@ -178,6 +220,7 @@ public class SinglePlayerHudUI : MonoBehaviour
    Text m_StatusText;
    Text m_ProgressText;
    Text m_BannerText;
+   Text m_PlayTimeWarningText;
     void Awake()
     {
         var canvasObject = new GameObject("SinglePlayerHudCanvas", typeof(Canvas), typeof(CanvasScaler));
@@ -196,6 +239,9 @@ public class SinglePlayerHudUI : MonoBehaviour
        var bannerBackground = CreatePanel(canvasObject.transform, Vector2.zero, new Vector2(640f, 180f), new Color(0f, 0f, 0f, 0.78f));
        m_BannerText = CreateText(bannerBackground.transform, "", 48, TextAnchor.MiddleCenter, Vector2.zero, new Vector2(600f, 130f), Color.white, font);
         bannerBackground.gameObject.SetActive(false);
+       var playTimeWarningBackground = CreatePanel(canvasObject.transform, new Vector2(0f, 280f), new Vector2(520f, 54f), new Color(0f, 0f, 0f, 0.65f));
+       m_PlayTimeWarningText = CreateText(playTimeWarningBackground.transform, "", 24, TextAnchor.MiddleCenter, Vector2.zero, new Vector2(480f, 34f), new Color(1f, 0.92f, 0.6f), font);
+       playTimeWarningBackground.gameObject.SetActive(false);
     }
 
    public void UpdateStats(string status, string progress, string banner)
@@ -205,6 +251,12 @@ public class SinglePlayerHudUI : MonoBehaviour
         m_BannerText.text = banner;
         m_BannerText.transform.parent.gameObject.SetActive(!string.IsNullOrEmpty(banner));
     }
+
+   public void UpdatePlayTimeWarning(string message)
+   {
+       m_PlayTimeWarningText.text = message;
+       m_PlayTimeWarningText.transform.parent.gameObject.SetActive(!string.IsNullOrEmpty(message));
+   }
 
     Font CreateFont()
     {

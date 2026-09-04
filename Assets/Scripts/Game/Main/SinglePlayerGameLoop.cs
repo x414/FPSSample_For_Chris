@@ -66,6 +66,7 @@ public class SinglePlayerGameLoop : Game.IGameLoop
     ExploreManager m_ExploreManager;
     ScoreManager m_ScoreManager;
     TimerManager m_TimerManager;
+    DailyPlayTimeTracker m_PlayTimeTracker;
     PowerupManager m_PowerupManager;
     SinglePlayerMenuUI m_MenuUI;
     SinglePlayerHudUI m_HudUI;
@@ -82,6 +83,7 @@ public class SinglePlayerGameLoop : Game.IGameLoop
     int m_LivesRemaining;
    float m_PlayerHealth;
     float m_ShieldMultiplier = 1f;
+    float m_PlayTimeWarningTimer;
 
     public bool Init(string[] args)
     {
@@ -102,6 +104,7 @@ public class SinglePlayerGameLoop : Game.IGameLoop
         }
 
         m_DiffConfig = DifficultyConfig.GetConfig(m_Difficulty.ToString());
+        m_PlayTimeTracker = new DailyPlayTimeTracker();
         m_ScoreManager = new ScoreManager();
         m_TimerManager = new TimerManager(15f);
         m_GameOver = false;
@@ -130,6 +133,9 @@ public class SinglePlayerGameLoop : Game.IGameLoop
 
     public void Shutdown()
     {
+        if (m_PlayTimeTracker != null)
+            m_PlayTimeTracker.Flush();
+
         Console.RemoveCommandsWithTag(GetHashCode());
         m_StateMachine.Shutdown();
         m_PlayerModuleServer.Shutdown();
@@ -204,7 +210,7 @@ public class SinglePlayerGameLoop : Game.IGameLoop
 
        var menuObject = new GameObject("SinglePlayerMenu");
        m_MenuUI = menuObject.AddComponent<SinglePlayerMenuUI>();
-       m_MenuUI.Initialize(ConfirmSelection);
+       m_MenuUI.Initialize(ConfirmSelection, m_PlayTimeTracker);
 
         var hudObject = new GameObject("SinglePlayerHud");
         m_HudUI = hudObject.AddComponent<SinglePlayerHudUI>();
@@ -276,6 +282,10 @@ public class SinglePlayerGameLoop : Game.IGameLoop
 
        if (m_GameOver) return;
 
+        m_PlayTimeWarningTimer = Mathf.Max(0f, m_PlayTimeWarningTimer - Time.unscaledDeltaTime);
+        if (m_PlayTimeTracker.ConsumeTenMinuteWarning())
+            m_PlayTimeWarningTimer = 5f;
+
        // Tick the game loop
        UpdateStateActiveTick();
         UpdatePlayerLives();
@@ -312,11 +322,18 @@ public class SinglePlayerGameLoop : Game.IGameLoop
                 "");
         }
 
+        m_HudUI.UpdatePlayTimeWarning(m_PlayTimeWarningTimer > 0f
+            ? m_PlayTimeTracker.GetTenMinuteWarningMessage()
+            : string.Empty);
+
         // Check game over
         if (m_TimerManager.IsExpired)
         {
             OnGameOver("Time's up!");
         }
+
+        if (m_PlayTimeTracker.Record(Time.unscaledDeltaTime, Game.GetMousePointerLock()))
+            OnGameOver(m_PlayTimeTracker.GetLimitMessage());
     }
 
     void OnRobotKilled(AIController robot)
@@ -347,7 +364,7 @@ public class SinglePlayerGameLoop : Game.IGameLoop
 
     void ConfirmSelection(Mode mode, Difficulty difficulty)
     {
-        if (m_GameplayStarted) return;
+        if (m_GameplayStarted || m_PlayTimeTracker == null || m_PlayTimeTracker.IsLimitReached) return;
 
         m_Mode = mode;
         m_Difficulty = difficulty;
@@ -500,6 +517,8 @@ public class SinglePlayerGameLoop : Game.IGameLoop
 
     void OnGameOver(string reason)
     {
+        if (m_GameOver) return;
+
         m_GameOver = true;
         ShowResult(reason);
         GameDebug.Log($"GAME OVER! {reason}");
