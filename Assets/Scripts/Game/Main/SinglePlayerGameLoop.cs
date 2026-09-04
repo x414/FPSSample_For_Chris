@@ -394,7 +394,8 @@ public class SinglePlayerGameLoop : Game.IGameLoop
         if (m_Mode == Mode.Wave)
             m_WaveManager = new WaveManager(m_DiffConfig, m_SpawnCenter, m_RobotSpawnForward, OnRobotKilled, CreateRobotEntity);
         else
-            m_ExploreManager = new ExploreManager(m_DiffConfig, m_SpawnCenter, m_RobotSpawnForward, OnRobotKilled, CreateRobotEntity);
+            m_ExploreManager = new ExploreManager(m_DiffConfig, m_SpawnCenter, m_RobotSpawnForward, OnRobotKilled, CreateRobotEntity,
+                CollectExplorePatrolAnchors());
 
         if (m_MenuUI != null)
             UnityEngine.Object.Destroy(m_MenuUI.gameObject);
@@ -402,6 +403,40 @@ public class SinglePlayerGameLoop : Game.IGameLoop
         Game.SetMousePointerLock(true);
         m_GameplayStarted = true;
         GameDebug.Log($"SinglePlayer active! Mode:{m_Mode} Difficulty:{m_Difficulty} Score:{m_ScoreManager.totalScore}");
+    }
+
+    List<Vector3> CollectExplorePatrolAnchors()
+    {
+        var anchors = new List<Vector3>();
+        var seen = new HashSet<Vector3>();
+
+        foreach (var spawnPoint in UnityEngine.Object.FindObjectsOfType<SpawnPoint>())
+        {
+            if (spawnPoint.teamIndex != -1)
+                continue;
+
+            var position = spawnPoint.transform.position;
+            position.y = Mathf.Max(0f, position.y);
+            if (seen.Add(position))
+                anchors.Add(position);
+        }
+
+        if (anchors.Count < 6)
+        {
+            foreach (var spawnPoint in UnityEngine.Object.FindObjectsOfType<SpawnPoint>())
+            {
+                if (spawnPoint.teamIndex == m_Player.teamIndex)
+                    continue;
+
+                var position = spawnPoint.transform.position;
+                position.y = Mathf.Max(0f, position.y);
+                if (seen.Add(position))
+                    anchors.Add(position);
+            }
+        }
+
+        GameDebug.Log($"Explore patrol anchors: {anchors.Count}");
+        return anchors;
     }
 
     Vector3 GetPlayerPosition()

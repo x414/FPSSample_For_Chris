@@ -33,6 +33,7 @@ public class AIController
     float m_ShootTimer;
     float m_PatrolTimer;
     float m_EntryTimer;
+    float m_PreviousHealth;
     Vector3 m_EntryTarget;
     float m_MoveSpeed;
     float m_ShootInterval;
@@ -41,6 +42,11 @@ public class AIController
     Vector3 m_PatrolOrigin;
     Vector3 m_PatrolTarget;
     bool m_HasPatrolTarget;
+    Vector3 m_DetourTarget;
+    bool m_HasDetourTarget;
+    float m_DetourTimer;
+    Vector3 m_LastPosition;
+    float m_StuckTimer;
     PlayerState m_PlayerState;
     GameObject m_CharacterObject;
     bool m_EntityHealthInitialized;
@@ -54,7 +60,9 @@ public class AIController
     const float attackRange = 20f;
     const float chaseRange = 30f;
     const float loseTargetRange = 40f;
-    const float patrolRadius = 8f;
+    const float patrolRadius = 20f;
+    const float patrolMinWaypointDistance = 10f;
+    const float patrolSpeedFactor = 0.2f;
 
     public AIController(RobotType type, DifficultyConfig config, Vector3 spawnPos)
     {
@@ -71,6 +79,8 @@ public class AIController
             ? Mathf.FloorToInt(50 * config.robotHealthMultiplier)
             : Mathf.FloorToInt(30 * config.robotHealthMultiplier);
         health = maxHealth;
+        m_PreviousHealth = maxHealth;
+        m_LastPosition = spawnPos;
 
         if (type == RobotType.A2_Hunter)
             m_MoveSpeed *= 1.5f;
@@ -82,12 +92,19 @@ public class AIController
 
         float distToPlayer = Vector3.Distance(m_Position, playerPos);
         m_FireThisTick = false;
+        UpdateStuckState(deltaTime);
         switch (state)
         {
             case AIState.Enter:
                 m_EntryTimer += deltaTime;
                 MoveTowards(m_EntryTarget, deltaTime);
-                if (Vector3.Distance(m_Position, m_EntryTarget) < 1.2f || m_EntryTimer >= 12f)
+                if (distToPlayer < m_DetectionRadius && CanSeePlayer(playerPos, distToPlayer))
+                {
+                    state = AIState.Chase;
+                    m_ShootTimer = 0f;
+                    ClearDetour();
+                }
+                else if (Vector3.Distance(m_Position, m_EntryTarget) < 1.2f || m_EntryTimer >= 12f)
                 {
                     state = AIState.Patrol;
                     m_PatrolOrigin = m_EntryTarget;
@@ -100,7 +117,7 @@ public class AIController
                 break;
 
             case AIState.Patrol:
-                if (distToPlayer < m_DetectionRadius)
+                if (distToPlayer < m_DetectionRadius && CanSeePlayer(playerPos, distToPlayer))
                     state = AIState.Chase;
                 else
                     PatrolUpdate(deltaTime);
@@ -136,7 +153,7 @@ public class AIController
                 break;
         }
 
-        UpdateDesiredMovement(playerPos, distToPlayer);
+        UpdateDesiredMovement(playerPos, distToPlayer, deltaTime);
     }
 
     public void BindCharacter(PlayerState playerState)
@@ -152,6 +169,9 @@ public class AIController
         m_TargetPosition = position;
         m_Rotation = Quaternion.identity;
         m_HasPatrolTarget = false;
+        m_LastPosition = position;
+        m_StuckTimer = 0f;
+        ClearDetour();
     }
 
     public void BeginEntry(Vector3 battlefieldPosition)
@@ -192,18 +212,79 @@ public class AIController
             if (character != null && character.heroTypeData != null)
             {
                 var healthState = entityManager.GetComponentData<HealthStateData>(entity);
-                healthState.SetMaxHealth(maxHealth);
+                healthState.maxHealth = maxHealth;
+                healthState.health = healthState.health > 0f
+                    ? Mathf.Min(healthState.health, maxHealth)
+                    : maxHealth;
                 entityManager.SetComponentData(entity, healthState);
+                if (entityManager.HasComponent<HitCollisionOwnerData>(entity))
+                {
+                    var collisionOwner = entityManager.GetComponentData<HitCollisionOwnerData>(entity);
+                    character.teamId = 1;
+                    collisionOwner.colliderFlags = 1U << character.teamId;
+                    collisionOwner.collisionEnabled = 1;
+                    entityManager.SetComponentData(entity, collisionOwner);
+                }
                 m_EntityHealthInitialized = true;
                 GameDebug.Log(robotType + " health set to " + maxHealth);
             }
+        }
+
+        if (entityManager.HasComponent<HealthStateData>(entity))
+        {
+            var healthState = entityManager.GetComponentData<HealthStateData>(entity);
+            var previousHealth = health;
+            health = Mathf.Clamp(Mathf.CeilToInt(healthState.health), 0, maxHealth);
+            if (health < previousHealth)
+            {
+                if (isAlive && state != AIState.Chase && state != AIState.Attack)
+                {
+                    state = AIState.Chase;
+                    m_ShootTimer = 0f;
+                    ClearDetour();
+                }
+                GameDebug.Log($"{robotType} damaged: {health}/{maxHealth}");
+            }
+            m_PreviousHealth = health;
         }
 
         if (entityManager.HasComponent<CharacterInterpolatedData>(entity))
             m_Position = entityManager.GetComponentData<CharacterInterpolatedData>(entity).position;
 
         if (entityManager.HasComponent<CharacterPredictedData>(entity))
-            m_Position = entityManager.GetComponentData<CharacterPredictedData>(entity).position;
+        {
+            var predictedState = entityManager.GetComponentData<CharacterPredictedData>(entity);
+            m_Position = predictedState.position;
+
+            if (entityManager.HasComponent<CharacterInterpolatedData>(entity))
+            {
+                var interpolatedState = entityManager.GetComponentData<CharacterInterpolatedData>(entity);
+                if (Vector3.SqrMagnitude(interpolatedState.position - predictedState.position) > 4f)
+                {
+                    interpolatedState.position = predictedState.position;
+                    entityManager.SetComponentData(entity, interpolatedState);
+                    GameDebug.Log($"AI presentation snap {robotType}: {predictedState.position}");
+                }
+            }
+        }
+
+        if (m_CharacterObject != null)
+        {
+            var character = m_CharacterObject.GetComponent<Character>();
+            if (character != null)
+            {
+                character.teamId = 1;
+                foreach (var presentation in character.presentations)
+                {
+                    if (presentation != null &&
+                        Vector3.SqrMagnitude(presentation.transform.position - m_Position) > 4f)
+                    {
+                        presentation.transform.position = m_Position;
+                        GameDebug.Log($"AI root snap {robotType}: {m_Position}");
+                    }
+                }
+            }
+        }
 
         if (m_Position.y < m_PatrolOrigin.y - 15f)
         {
@@ -272,7 +353,7 @@ public class AIController
         entityManager.SetComponentData(entity, commandComponent);
     }
 
-    void UpdateDesiredMovement(Vector3 playerPos, float distToPlayer)
+    void UpdateDesiredMovement(Vector3 playerPos, float distToPlayer, float deltaTime)
     {
         Vector3 target = state == AIState.Attack ? playerPos :
             state == AIState.Enter ? m_EntryTarget : m_PatrolTarget;
@@ -282,17 +363,169 @@ public class AIController
         if (state == AIState.Attack || state == AIState.Chase)
             target = playerPos;
 
+        target = ResolveMoveTarget(target);
         direction = target - m_Position;
         direction.y = 0f;
 
         if (direction.sqrMagnitude > 0.0001f)
-            DesiredLookYaw = Mathf.Atan2(direction.x, direction.z) * Mathf.Rad2Deg;
+        {
+            var targetYaw = Mathf.Atan2(direction.x, direction.z) * Mathf.Rad2Deg;
+            DesiredLookYaw = Mathf.MoveTowardsAngle(DesiredLookYaw, targetYaw, 270f * deltaTime);
+        }
 
         Vector3 aimDirection = playerPos + Vector3.up * 1.2f - (m_Position + Vector3.up * 1.5f);
         DesiredLookPitch = Mathf.Clamp(90f + Mathf.Atan2(aimDirection.y, new Vector2(aimDirection.x, aimDirection.z).magnitude) * Mathf.Rad2Deg, 0f, 180f);
 
-        DesiredMoveMagnitude = state == AIState.Attack || state == AIState.Idle ? 0f : 1f;
+        var configuredSpeed = state == AIState.Patrol ? m_MoveSpeed * patrolSpeedFactor : m_MoveSpeed;
+        if (m_DetourTimer > 0f && !m_HasDetourTarget && state == AIState.Patrol)
+            m_HasPatrolTarget = false;
+        DesiredMoveMagnitude = state == AIState.Attack || state == AIState.Idle ||
+            (m_DetourTimer > 0f && !m_HasDetourTarget)
+                ? 0f
+                : Mathf.Clamp01(configuredSpeed / Mathf.Max(1f, Game.config.playerSpeed));
         WantsFire = m_FireThisTick;
+    }
+
+    void UpdateStuckState(float deltaTime)
+    {
+        m_DetourTimer = Mathf.Max(0f, m_DetourTimer - deltaTime);
+        if (state == AIState.Attack || state == AIState.Idle || DesiredMoveMagnitude <= 0f)
+        {
+            m_LastPosition = m_Position;
+            return;
+        }
+
+        var expectedDistance = m_MoveSpeed * deltaTime;
+        if (state == AIState.Patrol)
+            expectedDistance *= patrolSpeedFactor;
+        if (Vector3.Distance(m_Position, m_LastPosition) < expectedDistance * 0.25f)
+            m_StuckTimer += deltaTime;
+        else
+            m_StuckTimer = 0f;
+
+        if (m_StuckTimer >= 0.6f)
+        {
+            if (state == AIState.Patrol)
+            {
+                if (m_StuckTimer >= 1.2f)
+                {
+                    SelectPatrolTarget();
+                    m_StuckTimer = 0f;
+                    return;
+                }
+            }
+            else
+            {
+            m_DetourTarget = FindDetourTarget();
+            m_HasDetourTarget = m_DetourTarget != Vector3.zero;
+            m_DetourTimer = m_HasDetourTarget ? 1.6f : 0.3f;
+            m_StuckTimer = 0f;
+            }
+        }
+
+        m_LastPosition = m_Position;
+    }
+
+    Vector3 ResolveMoveTarget(Vector3 target)
+    {
+        if (state == AIState.Attack || state == AIState.Idle || state == AIState.Patrol)
+            return target;
+
+        if (m_DetourTimer > 0f && m_HasDetourTarget &&
+            Vector3.Distance(m_Position, m_DetourTarget) > 0.6f)
+            return m_DetourTarget;
+
+        var direction = target - m_Position;
+        direction.y = 0f;
+        if (direction.sqrMagnitude < 0.25f)
+            return target;
+
+        var origin = m_Position + Vector3.up * 1.2f;
+        RaycastHit obstacle;
+        if (!TryFindObstacle(origin, direction.normalized, Mathf.Min(direction.magnitude, 4f), out obstacle))
+        {
+            ClearDetour();
+            return target;
+        }
+
+        m_DetourTarget = FindDetourTarget(direction, obstacle);
+        m_HasDetourTarget = m_DetourTarget != Vector3.zero;
+        m_DetourTimer = m_HasDetourTarget ? 1.6f : 0.3f;
+        if (m_HasDetourTarget)
+            GameDebug.Log($"AI detour {robotType}: {m_Position} -> {m_DetourTarget}");
+        return m_HasDetourTarget ? m_DetourTarget : target;
+    }
+
+    Vector3 FindDetourTarget()
+    {
+        var desiredDirection = (m_Position - m_LastPosition).normalized;
+        if (desiredDirection.sqrMagnitude < 0.01f)
+            desiredDirection = Vector3.forward;
+        return FindDetourTarget(desiredDirection, default);
+    }
+
+    Vector3 FindDetourTarget(Vector3 desiredDirection, RaycastHit obstacle)
+    {
+        desiredDirection.y = 0f;
+        desiredDirection.Normalize();
+
+        Vector3 wallNormal = obstacle.normal;
+        wallNormal.y = 0f;
+        if (wallNormal.sqrMagnitude < 0.01f)
+            wallNormal = -desiredDirection;
+        wallNormal.Normalize();
+
+        var alongWall = Vector3.Cross(Vector3.up, wallNormal).normalized;
+        if (Vector3.Dot(alongWall, desiredDirection) < 0f)
+            alongWall = -alongWall;
+
+        var basePoint = obstacle.collider != null ? obstacle.point : m_Position + desiredDirection * 2f;
+        var candidate = basePoint + alongWall * 3f + wallNormal * 0.8f;
+        candidate.y = m_Position.y;
+        var toCandidate = candidate - m_Position;
+        toCandidate.y = 0f;
+        if (toCandidate.sqrMagnitude > 0.1f &&
+            !TryFindObstacle(m_Position + Vector3.up * 1.2f, toCandidate.normalized,
+                Mathf.Min(toCandidate.magnitude, 3f), out _))
+            return candidate;
+
+        candidate = basePoint - alongWall * 3f + wallNormal * 0.8f;
+        candidate.y = m_Position.y;
+        toCandidate = candidate - m_Position;
+        toCandidate.y = 0f;
+        if (toCandidate.sqrMagnitude > 0.1f &&
+            !TryFindObstacle(m_Position + Vector3.up * 1.2f, toCandidate.normalized,
+                Mathf.Min(toCandidate.magnitude, 3f), out _))
+            return candidate;
+
+        return Vector3.zero;
+    }
+
+    void ClearDetour()
+    {
+        m_DetourTarget = Vector3.zero;
+        m_HasDetourTarget = false;
+        m_DetourTimer = 0f;
+    }
+
+    static bool TryFindObstacle(Vector3 origin, Vector3 direction, float distance, out RaycastHit obstacle)
+    {
+        obstacle = default;
+        var hits = Physics.RaycastAll(origin, direction, distance, Physics.DefaultRaycastLayers,
+            QueryTriggerInteraction.Ignore);
+        System.Array.Sort(hits, (left, right) => left.distance.CompareTo(right.distance));
+
+        foreach (var hit in hits)
+        {
+            if (hit.collider == null || hit.collider.GetComponent<HitCollision>() != null ||
+                hit.collider.GetComponentInParent<Character>() != null)
+                continue;
+
+            obstacle = hit;
+            return true;
+        }
+
+        return false;
     }
 
     void ApplyVariantColor()
@@ -356,20 +589,73 @@ public class AIController
 
     void PatrolUpdate(float deltaTime)
     {
-        if (!m_HasPatrolTarget || Vector3.Distance(m_Position, m_PatrolTarget) < 1f)
+        m_PatrolTimer -= deltaTime;
+        if (!m_HasPatrolTarget || m_PatrolTimer <= 0f ||
+            Vector3.Distance(m_Position, m_PatrolTarget) < 1.2f)
         {
-            var random = UnityEngine.Random.insideUnitCircle * patrolRadius;
-            m_PatrolTarget = m_PatrolOrigin + new Vector3(random.x, 0, random.y);
-            m_HasPatrolTarget = true;
+            SelectPatrolTarget();
         }
-        MoveTowards(m_PatrolTarget, deltaTime);
+        MoveTowards(m_PatrolTarget, deltaTime, GetMoveSpeed());
+    }
+
+    bool CanSeePlayer(Vector3 playerPos, float distanceToPlayer)
+    {
+        if (distanceToPlayer <= 4f)
+            return true;
+
+        var eyePosition = m_Position + Vector3.up * 1.5f;
+        var targetPosition = playerPos + Vector3.up * 1.2f;
+        var direction = targetPosition - eyePosition;
+        var distance = direction.magnitude;
+        if (distance < 0.5f)
+            return true;
+
+        return !TryFindObstacle(eyePosition, direction / distance,
+            Mathf.Min(distance - 0.2f, m_DetectionRadius), out _);
     }
 
     void MoveTowards(Vector3 target, float deltaTime)
     {
+        MoveTowards(target, deltaTime, GetMoveSpeed());
+    }
+
+    float GetMoveSpeed()
+    {
+        return state == AIState.Patrol ? m_MoveSpeed * patrolSpeedFactor : m_MoveSpeed;
+    }
+
+    void MoveTowards(Vector3 target, float deltaTime, float speed)
+    {
         var dir = (target - m_Position).normalized;
-        m_Position += dir * m_MoveSpeed * deltaTime;
+        m_Position += dir * speed * deltaTime;
         m_Rotation = Quaternion.LookRotation(dir);
+    }
+
+    void SelectPatrolTarget()
+    {
+        for (var attempt = 0; attempt < 8; attempt++)
+        {
+            var angle = UnityEngine.Random.Range(0f, Mathf.PI * 2f);
+            var distance = UnityEngine.Random.Range(patrolMinWaypointDistance, patrolRadius);
+            var candidate = m_PatrolOrigin + new Vector3(
+                Mathf.Cos(angle) * distance, 0f, Mathf.Sin(angle) * distance);
+            var direction = candidate - m_Position;
+            direction.y = 0f;
+
+            if (direction.sqrMagnitude < 0.25f)
+                continue;
+
+            if (attempt < 7 && TryFindObstacle(
+                m_Position + Vector3.up * 1.2f, direction.normalized,
+                Mathf.Min(direction.magnitude, 8f), out _))
+                continue;
+
+            m_PatrolTarget = candidate;
+            m_HasPatrolTarget = true;
+            m_PatrolTimer = direction.magnitude / Mathf.Max(0.1f, GetMoveSpeed()) + 5f;
+            ClearDetour();
+            return;
+        }
     }
 
     public void TakeDamage(int damage)

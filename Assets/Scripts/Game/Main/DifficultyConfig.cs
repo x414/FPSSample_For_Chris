@@ -11,6 +11,8 @@ public class DifficultyConfig
 
     [Header("Explore Mode")]
     public int totalRobots = 8;
+    public int exploreTotalRobots = 12;
+    public int exploreMaxActiveRobots = 2;
     public float detectionRadius = 30f;
     public float playerHealthRegen = 5f;
 
@@ -35,6 +37,8 @@ public class DifficultyConfig
                 config.baseEnemiesPerWave = 2;
                 config.robotHealthMultiplier = 0.5f;
                 config.totalRobots = 10;
+                config.exploreTotalRobots = 12;
+                config.exploreMaxActiveRobots = 2;
                 config.maxActiveRobots = 1;
                 config.robotSpawnCooldown = 1.2f;
                 config.detectionRadius = 30f;
@@ -50,6 +54,8 @@ public class DifficultyConfig
                 config.baseEnemiesPerWave = 4;
                 config.robotHealthMultiplier = 1.5f;
                 config.totalRobots = 24;
+                config.exploreTotalRobots = 26;
+                config.exploreMaxActiveRobots = 4;
                 config.maxActiveRobots = 2;
                 config.robotSpawnCooldown = 0.6f;
                 config.detectionRadius = 40f;
@@ -59,6 +65,8 @@ public class DifficultyConfig
                 config.maxLives = 3;
                 break;
             default: // normal
+                config.exploreTotalRobots = 18;
+                config.exploreMaxActiveRobots = 3;
                 break;
         }
         return config;
