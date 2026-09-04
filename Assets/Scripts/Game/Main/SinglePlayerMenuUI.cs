@@ -333,7 +333,10 @@ public class SinglePlayerResultUI : MonoBehaviour
         panel.anchoredPosition = Vector2.zero;
         panel.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0.86f);
 
-        m_TitleText = CreateText(panel, "RESULT", 42, TextAnchor.MiddleCenter, new Vector2(0f, 125f), new Vector2(480f, 65f), Color.white, font);
+        m_TitleText = CreateText(panel, "RESULT", 34, TextAnchor.MiddleCenter, new Vector2(0f, 130f), new Vector2(510f, 100f), Color.white, font);
+        m_TitleText.resizeTextForBestFit = true;
+        m_TitleText.resizeTextMinSize = 20;
+        m_TitleText.resizeTextMaxSize = 34;
         m_StatsText = CreateText(panel, "", 26, TextAnchor.MiddleCenter, new Vector2(0f, 55f), new Vector2(480f, 80f), new Color(0.85f, 0.9f, 1f), font);
         m_PlayAgainButton = CreateButton(panel, "PLAY AGAIN", new Vector2(0f, -55f), new Vector2(380f, 72f), font, Restart);
         CreateButton(panel, "QUIT GAME", new Vector2(0f, -140f), new Vector2(380f, 60f), font, QuitGame);

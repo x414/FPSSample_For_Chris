@@ -106,7 +106,7 @@ public class SinglePlayerGameLoop : Game.IGameLoop
         m_DiffConfig = DifficultyConfig.GetConfig(m_Difficulty.ToString());
         m_PlayTimeTracker = new DailyPlayTimeTracker();
         m_ScoreManager = new ScoreManager();
-        m_TimerManager = new TimerManager(15f);
+        m_TimerManager = new TimerManager(20f);
         m_GameOver = false;
         m_GameplayStarted = false;
 
@@ -373,7 +373,7 @@ public class SinglePlayerGameLoop : Game.IGameLoop
        m_PlayerHealth = m_DiffConfig.playerMaxHealth;
         m_PlayerDeathTracked = false;
         m_ScoreManager.Reset();
-        m_TimerManager = new TimerManager(15f);
+        m_TimerManager = new TimerManager(20f);
 
         m_SpawnCenter = Vector3.zero;
         foreach (var spawnPoint in UnityEngine.Object.FindObjectsOfType<SpawnPoint>())
