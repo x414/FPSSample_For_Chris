@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using Unity.Entities;
@@ -69,12 +70,12 @@ public class SinglePlayerGameLoop : Game.IGameLoop
     SinglePlayerMenuUI m_MenuUI;
     SinglePlayerHudUI m_HudUI;
     Vector3 m_SpawnCenter;
+    Vector3 m_RobotSpawnForward = Vector3.forward;
     SinglePlayerResultUI m_ResultUI;
-    readonly List<Vector3> m_RobotSpawnPositions = new List<Vector3>();
-    int m_RobotSpawnPositionIndex;
 
    bool m_GameOver;
-   bool m_GameplayStarted;
+    bool m_GameplayStarted;
+    bool m_AutoStart;
     bool m_PlayerDeathTracked;
     int m_LastBonusWave;
    int m_NextBotPlayerId = 100;
@@ -87,6 +88,18 @@ public class SinglePlayerGameLoop : Game.IGameLoop
         m_Mode = Mode.Wave;
         m_Difficulty = Difficulty.Normal;
         const string levelName = "level_01";
+
+        foreach (var argument in args)
+        {
+            if (string.Equals(argument, "explore", StringComparison.OrdinalIgnoreCase))
+                m_Mode = Mode.Explore;
+            else if (string.Equals(argument, "easy", StringComparison.OrdinalIgnoreCase))
+                m_Difficulty = Difficulty.Easy;
+            else if (string.Equals(argument, "hard", StringComparison.OrdinalIgnoreCase))
+                m_Difficulty = Difficulty.Hard;
+            else if (string.Equals(argument, "autostart", StringComparison.OrdinalIgnoreCase))
+                m_AutoStart = true;
+        }
 
         m_DiffConfig = DifficultyConfig.GetConfig(m_Difficulty.ToString());
         m_ScoreManager = new ScoreManager();
@@ -198,6 +211,8 @@ public class SinglePlayerGameLoop : Game.IGameLoop
 
        Game.SetMousePointerLock(false);
         GameDebug.Log("SinglePlayer ready. Select mode and difficulty.");
+        if (m_AutoStart)
+            ConfirmSelection(m_Mode, m_Difficulty);
     }
 
     void LeaveActiveState()
@@ -344,23 +359,15 @@ public class SinglePlayerGameLoop : Game.IGameLoop
         m_TimerManager = new TimerManager(15f);
 
         m_SpawnCenter = Vector3.zero;
-        m_RobotSpawnPositions.Clear();
-        m_RobotSpawnPositionIndex = 0;
-        foreach (var spawnPoint in Object.FindObjectsOfType<SpawnPoint>())
+        foreach (var spawnPoint in UnityEngine.Object.FindObjectsOfType<SpawnPoint>())
         {
             if (spawnPoint.teamIndex == m_Player.teamIndex)
             {
                 m_SpawnCenter = spawnPoint.transform.position;
+                m_RobotSpawnForward = spawnPoint.transform.forward;
+                m_RobotSpawnForward.y = 0f;
+                m_RobotSpawnForward.Normalize();
             }
-            else
-            {
-                m_RobotSpawnPositions.Add(spawnPoint.transform.position);
-            }
-        }
-
-        if (m_RobotSpawnPositions.Count == 0)
-        {
-            m_RobotSpawnPositions.Add(m_SpawnCenter);
         }
 
         if (m_SpawnCenter == Vector3.zero)
@@ -368,9 +375,9 @@ public class SinglePlayerGameLoop : Game.IGameLoop
         m_PowerupManager = new PowerupManager(m_DiffConfig, m_SpawnCenter);
 
         if (m_Mode == Mode.Wave)
-            m_WaveManager = new WaveManager(m_DiffConfig, m_SpawnCenter, OnRobotKilled, CreateRobotEntity);
+            m_WaveManager = new WaveManager(m_DiffConfig, m_SpawnCenter, m_RobotSpawnForward, OnRobotKilled, CreateRobotEntity);
         else
-            m_ExploreManager = new ExploreManager(m_DiffConfig, m_SpawnCenter, OnRobotKilled, CreateRobotEntity);
+            m_ExploreManager = new ExploreManager(m_DiffConfig, m_SpawnCenter, m_RobotSpawnForward, OnRobotKilled, CreateRobotEntity);
 
         if (m_MenuUI != null)
             UnityEngine.Object.Destroy(m_MenuUI.gameObject);
@@ -418,17 +425,7 @@ public class SinglePlayerGameLoop : Game.IGameLoop
 
     Vector3 ResolveRobotSpawnPosition(Vector3 position)
     {
-        var rayOrigin = position + Vector3.up * 12f;
-        RaycastHit hit;
-        if (Physics.Raycast(rayOrigin, Vector3.down, out hit, 1000f, Physics.DefaultRaycastLayers,
-            QueryTriggerInteraction.Ignore))
-        {
-            return hit.point + Vector3.up * 0.2f;
-        }
-
-        var candidate = m_RobotSpawnPositions[m_RobotSpawnPositionIndex % m_RobotSpawnPositions.Count];
-        m_RobotSpawnPositionIndex++;
-        return candidate + Vector3.up * 0.2f;
+        return position;
     }
 
     void OnPlayerHit(float damage)

@@ -15,7 +15,7 @@ public static class RenderSettings
     public static ConfigVar rQuality;
     [ConfigVar(Name = "r.vsync", DefaultValue = "1", Description = "Number of v-blanks to wait for each frame. 0 means no sync", Flags = ConfigVar.Flags.Save)]
     public static ConfigVar rVSync;
-    [ConfigVar(Name = "r.fullscreen", DefaultValue = "3", Description = "Full screen mode (0: exclusive, 1: full, 3: windowed)", Flags = ConfigVar.Flags.Save)]
+    [ConfigVar(Name = "r.fullscreen", DefaultValue = "3", Description = "Full screen mode (1: fullscreen window, 3: windowed; Windows maps unsupported modes to fullscreen window)", Flags = ConfigVar.Flags.Save)]
     public static ConfigVar rFullscreen;
     [ConfigVar(Name = "r.aamode", DefaultValue = "taa", Description = "AA mode: off, fxaa, smaa, taa", Flags = ConfigVar.Flags.Save)]
     public static ConfigVar rAAMode;
@@ -132,7 +132,14 @@ public static class RenderSettings
             QualitySettings.vSyncCount = rVSync.IntValue;
 
         if (rFullscreen.ChangeCheck())
-            Screen.fullScreenMode = (FullScreenMode)rFullscreen.IntValue;
+        {
+            var fullscreenMode = (FullScreenMode)rFullscreen.IntValue;
+#if UNITY_STANDALONE_WIN
+            if (fullscreenMode == FullScreenMode.ExclusiveFullScreen || fullscreenMode == FullScreenMode.MaximizedWindow)
+                fullscreenMode = FullScreenMode.FullScreenWindow;
+#endif
+            Screen.fullScreenMode = fullscreenMode;
+        }
 
         //        if (rNewPrepareLights.ChangeCheck())
         //            LightLoop.useNewPrepareLights = (rNewPrepareLights.IntValue != 0);

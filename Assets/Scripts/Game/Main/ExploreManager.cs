@@ -31,16 +31,18 @@ public class ExploreManager
     int m_TotalRobots;
     DifficultyConfig m_Config;
     Vector3 m_SpawnCenter;
+    Vector3 m_SpawnForward;
     bool m_AllDead => remainingRobots == 0;
     float m_SpawnCooldown;
     System.Action<AIController> m_OnRobotKilled;
     System.Action<AIController, Vector3> m_CreateRobotEntity;
 
-    public ExploreManager(DifficultyConfig config, Vector3 spawnCenter, System.Action<AIController> onRobotKilled,
+    public ExploreManager(DifficultyConfig config, Vector3 spawnCenter, Vector3 spawnForward, System.Action<AIController> onRobotKilled,
         System.Action<AIController, Vector3> createRobotEntity)
     {
         m_Config = config;
         m_SpawnCenter = spawnCenter;
+        m_SpawnForward = spawnForward;
         m_OnRobotKilled = onRobotKilled;
         m_CreateRobotEntity = createRobotEntity;
         m_SpawnCooldown = 0f;
@@ -59,16 +61,16 @@ public class ExploreManager
             {
                 type = RobotType.A1_Infantry,
                 angle = Random.Range(0f, Mathf.PI * 2f) + i * 2.4f,
-                entryDist = Random.Range(3f, 8f),
-                spawnDist = Random.Range(20f, 32f)
+                entryDist = Random.Range(4f, 8f),
+                spawnDist = Random.Range(12f, 20f)
             });
         for (int i = 0; i < a2Count; i++)
             m_PendingRobots.Add(new RobotSpawnRequest
             {
                 type = RobotType.A2_Hunter,
                 angle = Random.Range(0f, Mathf.PI * 2f) + (a1Count + i) * 2.4f,
-                entryDist = Random.Range(3f, 8f),
-                spawnDist = Random.Range(20f, 32f)
+                entryDist = Random.Range(4f, 8f),
+                spawnDist = Random.Range(12f, 20f)
             });
 
         SpawnQueuedRobots();
@@ -81,10 +83,14 @@ public class ExploreManager
         var angle = request.angle;
         var entryDist = request.entryDist;
         var spawnDist = request.spawnDist;
-        var direction = new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle));
+        var direction = m_SpawnForward.sqrMagnitude > 0.01f
+            ? Quaternion.AngleAxis(Random.Range(-20f, 20f), Vector3.up) * m_SpawnForward
+            : new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle));
+        direction.y = 0f;
+        direction.Normalize();
         var entryTarget = m_SpawnCenter + direction * entryDist;
         var pos = m_SpawnCenter + direction * spawnDist;
-        pos.y = 0.1f;
+        pos.y = m_SpawnCenter.y + 0.1f;
         var robot = new AIController(request.type, m_Config, pos);
         m_Robots.Add(robot);
         m_CreateRobotEntity?.Invoke(robot, pos);

@@ -122,7 +122,7 @@ public class OptionsMenu : MonoBehaviour
         AddHeading("Graphics settings");
         AddDropdown(RenderSettings.rQuality, "Overall quality", new List<string>(QualitySettings.names), new List<string>(QualitySettings.names));
         AddDropdown(RenderSettings.rResolution, "Screen resolution", res, res, "Custom");
-        AddDropdown(RenderSettings.rFullscreen, "Full screen mode", new List<string>() { "Windowed", "Full screen", "Exclusive" }, new List<string>() { "3", "1", "0" });
+        AddDropdown(RenderSettings.rFullscreen, "Full screen mode", new List<string>() { "Windowed", "Full screen window" }, new List<string>() { "3", "1" });
         AddToggle(RenderSettings.rVSync, "Enable v-sync");
         AddToggle(RenderSettings.rBloom, "Bloom effect");
         AddToggle(RenderSettings.rMotionBlur, "Motion blur effect");
