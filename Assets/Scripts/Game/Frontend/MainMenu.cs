@@ -113,6 +113,13 @@ public class MainMenu : MonoBehaviour
 
     public void OnLeaveGame()
     {
+        if (Game.GetGameLoop<SinglePlayerGameLoop>() != null)
+        {
+            Game.game.clientFrontend.ShowMenu(ClientFrontend.MenuShowing.None);
+            Game.game.RequestGameLoop(typeof(SinglePlayerGameLoop), new string[0]);
+            return;
+        }
+
         Console.EnqueueCommand("disconnect");
     }
 

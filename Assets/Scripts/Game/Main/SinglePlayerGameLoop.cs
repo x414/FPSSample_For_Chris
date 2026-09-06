@@ -12,7 +12,7 @@ public enum SinglePlayerState
 
 public class SinglePlayerGameLoop : Game.IGameLoop
 {
-    public enum Mode { Wave, Explore }
+    public enum Mode { Wave, Explore, TestWave, TestExplore }
     public enum Difficulty { Easy, Normal, Hard }
 
     // Module references (same as PreviewGameLoop)
@@ -95,6 +95,10 @@ public class SinglePlayerGameLoop : Game.IGameLoop
         {
             if (string.Equals(argument, "explore", StringComparison.OrdinalIgnoreCase))
                 m_Mode = Mode.Explore;
+            else if (string.Equals(argument, "test-wave", StringComparison.OrdinalIgnoreCase))
+                m_Mode = Mode.TestWave;
+            else if (string.Equals(argument, "test-explore", StringComparison.OrdinalIgnoreCase))
+                m_Mode = Mode.TestExplore;
             else if (string.Equals(argument, "easy", StringComparison.OrdinalIgnoreCase))
                 m_Difficulty = Difficulty.Easy;
             else if (string.Equals(argument, "hard", StringComparison.OrdinalIgnoreCase))
@@ -283,7 +287,7 @@ public class SinglePlayerGameLoop : Game.IGameLoop
        if (m_GameOver) return;
 
         m_PlayTimeWarningTimer = Mathf.Max(0f, m_PlayTimeWarningTimer - Time.unscaledDeltaTime);
-        if (m_PlayTimeTracker.ConsumeTenMinuteWarning())
+        if (!IsTestMode() && m_PlayTimeTracker.ConsumeTenMinuteWarning())
             m_PlayTimeWarningTimer = 5f;
 
        // Tick the game loop
@@ -303,7 +307,7 @@ public class SinglePlayerGameLoop : Game.IGameLoop
         // Tick game mode
         System.Action<float> onShootPlayer = (damage) => OnPlayerHit(damage);
 
-        if (m_Mode == Mode.Wave && m_WaveManager != null)
+        if ((m_Mode == Mode.Wave || m_Mode == Mode.TestWave) && m_WaveManager != null)
         {
            m_WaveManager.Tick(Time.deltaTime, playerPos, onShootPlayer, m_GameWorld);
            CheckWaveKills();
@@ -312,7 +316,7 @@ public class SinglePlayerGameLoop : Game.IGameLoop
                 m_WaveManager.GetProgressText(),
                 m_WaveManager.GetAnnouncementText());
         }
-        else if (m_Mode == Mode.Explore && m_ExploreManager != null)
+        else if ((m_Mode == Mode.Explore || m_Mode == Mode.TestExplore) && m_ExploreManager != null)
         {
            m_ExploreManager.Tick(Time.deltaTime, playerPos, onShootPlayer, m_GameWorld);
            CheckExploreKills();
@@ -322,7 +326,7 @@ public class SinglePlayerGameLoop : Game.IGameLoop
                 "");
         }
 
-        m_HudUI.UpdatePlayTimeWarning(m_PlayTimeWarningTimer > 0f
+        m_HudUI.UpdatePlayTimeWarning(!IsTestMode() && m_PlayTimeWarningTimer > 0f
             ? m_PlayTimeTracker.GetTenMinuteWarningMessage()
             : string.Empty);
 
@@ -332,7 +336,7 @@ public class SinglePlayerGameLoop : Game.IGameLoop
             OnGameOver("Time's up!");
         }
 
-        if (m_PlayTimeTracker.Record(Time.unscaledDeltaTime, Game.GetMousePointerLock()))
+        if (!IsTestMode() && m_PlayTimeTracker.Record(Time.unscaledDeltaTime, Game.GetMousePointerLock()))
             OnGameOver(m_PlayTimeTracker.GetLimitMessage());
     }
 
@@ -364,7 +368,7 @@ public class SinglePlayerGameLoop : Game.IGameLoop
 
     void ConfirmSelection(Mode mode, Difficulty difficulty)
     {
-        if (m_GameplayStarted || m_PlayTimeTracker == null || m_PlayTimeTracker.IsLimitReached) return;
+        if (m_GameplayStarted || (!IsTestMode(mode) && m_PlayTimeTracker != null && m_PlayTimeTracker.IsLimitReached)) return;
 
         m_Mode = mode;
         m_Difficulty = difficulty;
@@ -373,7 +377,7 @@ public class SinglePlayerGameLoop : Game.IGameLoop
        m_PlayerHealth = m_DiffConfig.playerMaxHealth;
         m_PlayerDeathTracked = false;
         m_ScoreManager.Reset();
-        m_TimerManager = new TimerManager(20f);
+        m_TimerManager = new TimerManager(IsTestMode(mode) ? 1f : 20f);
 
         m_SpawnCenter = Vector3.zero;
         foreach (var spawnPoint in UnityEngine.Object.FindObjectsOfType<SpawnPoint>())
@@ -391,7 +395,8 @@ public class SinglePlayerGameLoop : Game.IGameLoop
             m_SpawnCenter = GetPlayerPosition();
         m_PowerupManager = new PowerupManager(m_DiffConfig, m_SpawnCenter);
 
-        if (m_Mode == Mode.Wave)
+        var baseMode = GetBaseMode(mode);
+        if (baseMode == Mode.Wave)
             m_WaveManager = new WaveManager(m_DiffConfig, m_SpawnCenter, m_RobotSpawnForward, OnRobotKilled, CreateRobotEntity);
         else
             m_ExploreManager = new ExploreManager(m_DiffConfig, m_SpawnCenter, m_RobotSpawnForward, OnRobotKilled, CreateRobotEntity,
@@ -403,6 +408,23 @@ public class SinglePlayerGameLoop : Game.IGameLoop
         Game.SetMousePointerLock(true);
         m_GameplayStarted = true;
         GameDebug.Log($"SinglePlayer active! Mode:{m_Mode} Difficulty:{m_Difficulty} Score:{m_ScoreManager.totalScore}");
+    }
+
+    public static bool IsTestMode(Mode mode)
+    {
+        return mode == Mode.TestWave || mode == Mode.TestExplore;
+    }
+
+    public bool IsTestMode()
+    {
+        return IsTestMode(m_Mode);
+    }
+
+    static Mode GetBaseMode(Mode mode)
+    {
+        return mode == Mode.TestWave ? Mode.Wave
+            : mode == Mode.TestExplore ? Mode.Explore
+            : mode;
     }
 
     List<Vector3> CollectExplorePatrolAnchors()
