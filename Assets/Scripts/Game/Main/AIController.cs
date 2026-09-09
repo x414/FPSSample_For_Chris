@@ -5,7 +5,8 @@ using Unity.Mathematics;
 public enum RobotType
 {
     A1_Infantry,
-    A2_Hunter
+    A2_Hunter,
+    A3_Tactician
 }
 
 public enum AIState
@@ -52,9 +53,23 @@ public class AIController
     bool m_EntityHealthInitialized;
     bool m_FireThisTick;
 
+    // A3 Tactician behavior fields
+    float m_StrafeTimer;
+    float m_StrafeDirection = 1f;
+    int m_BurstShotsRemaining;
+    float m_BurstPauseTimer;
+    float m_ReactionDelayTimer;
+    bool m_HasReacted;
+    bool m_IsFlanking;
+    float m_FlankTimer;
+    Vector3 m_FlankTarget;
+    bool m_IsRetreating;
+    float m_RetreatTimer;
+
     public float DesiredLookYaw { get; private set; }
     public float DesiredLookPitch { get; private set; }
     public float DesiredMoveMagnitude { get; private set; }
+    public float DesiredMoveYaw { get; private set; }
     public bool WantsFire { get; private set; }
 
     const float attackRange = 20f;
@@ -77,13 +92,22 @@ public class AIController
 
         maxHealth = type == RobotType.A1_Infantry
             ? Mathf.FloorToInt(50 * config.robotHealthMultiplier)
-            : Mathf.FloorToInt(30 * config.robotHealthMultiplier);
+            : type == RobotType.A3_Tactician
+                ? Mathf.FloorToInt(150 * config.robotHealthMultiplier)
+                : Mathf.FloorToInt(30 * config.robotHealthMultiplier);
         health = maxHealth;
         m_PreviousHealth = maxHealth;
         m_LastPosition = spawnPos;
 
         if (type == RobotType.A2_Hunter)
             m_MoveSpeed *= 1.5f;
+
+        if (type == RobotType.A3_Tactician)
+        {
+            m_StrafeTimer = 0f;
+            m_ReactionDelayTimer = UnityEngine.Random.Range(0.3f, 0.8f);
+            m_HasReacted = false;
+        }
     }
 
     public void Tick(float deltaTime, Vector3 playerPos, System.Action<float> onShootPlayer)
@@ -93,12 +117,42 @@ public class AIController
         float distToPlayer = Vector3.Distance(m_Position, playerPos);
         m_FireThisTick = false;
         UpdateStuckState(deltaTime);
+
+        if (robotType == RobotType.A3_Tactician && !m_HasReacted && distToPlayer < m_DetectionRadius)
+        {
+            m_ReactionDelayTimer -= deltaTime;
+            if (m_ReactionDelayTimer <= 0f)
+                m_HasReacted = true;
+        }
+
+        if (robotType == RobotType.A3_Tactician && health < maxHealth * 0.3f && !m_IsRetreating && state != AIState.Patrol)
+        {
+            m_IsRetreating = true;
+            m_RetreatTimer = UnityEngine.Random.Range(3f, 6f);
+            GameDebug.Log($"A3 Tactician retreating! HP:{health}/{maxHealth}");
+        }
+
+        if (m_IsRetreating)
+        {
+            m_RetreatTimer -= deltaTime;
+            if (m_RetreatTimer <= 0f || distToPlayer > loseTargetRange)
+            {
+                m_IsRetreating = false;
+                if (distToPlayer > loseTargetRange)
+                    state = AIState.Patrol;
+            }
+        }
+
         switch (state)
         {
             case AIState.Enter:
                 m_EntryTimer += deltaTime;
                 MoveTowards(m_EntryTarget, deltaTime);
-                if (distToPlayer < m_DetectionRadius && CanSeePlayer(playerPos, distToPlayer))
+                var shouldDetect = distToPlayer < m_DetectionRadius && CanSeePlayer(playerPos, distToPlayer);
+                if (robotType == RobotType.A3_Tactician && !m_HasReacted)
+                    shouldDetect = false;
+
+                if (shouldDetect)
                 {
                     state = AIState.Chase;
                     m_ShootTimer = 0f;
@@ -117,37 +171,82 @@ public class AIController
                 break;
 
             case AIState.Patrol:
-                if (distToPlayer < m_DetectionRadius && CanSeePlayer(playerPos, distToPlayer))
-                    state = AIState.Chase;
-                else
+                if (robotType == RobotType.A3_Tactician && !m_HasReacted)
                     PatrolUpdate(deltaTime);
+                else
+                {
+                    if (distToPlayer < m_DetectionRadius && CanSeePlayer(playerPos, distToPlayer))
+                        state = AIState.Chase;
+                    else
+                        PatrolUpdate(deltaTime);
+                }
                 break;
 
             case AIState.Chase:
-                MoveTowards(playerPos, deltaTime);
-                if (distToPlayer < attackRange)
+                if (robotType == RobotType.A3_Tactician && !m_IsRetreating)
+                {
+                    UpdateFlank(deltaTime, playerPos, distToPlayer);
+                    if (m_IsFlanking)
+                        MoveTowards(m_FlankTarget, deltaTime);
+                    else
+                        MoveTowards(playerPos, deltaTime);
+                }
+                else if (m_IsRetreating)
+                {
+                    var retreatDirection = (m_Position - playerPos).normalized;
+                    var retreatTarget = m_Position + retreatDirection * 10f;
+                    MoveTowards(retreatTarget, deltaTime);
+                }
+                else
+                {
+                    MoveTowards(playerPos, deltaTime);
+                }
+
+                var effectiveAttackRange = attackRange;
+                if (robotType == RobotType.A3_Tactician)
+                    effectiveAttackRange = 25f;
+
+                if (distToPlayer < effectiveAttackRange && !m_IsRetreating)
                 {
                     state = AIState.Attack;
                     m_ShootTimer = 0;
+                    m_BurstShotsRemaining = 0;
+                    m_BurstPauseTimer = 0f;
+                    if (robotType == RobotType.A3_Tactician)
+                        StartStrafe();
                 }
-                else if (distToPlayer > loseTargetRange)
+                else if (distToPlayer > loseTargetRange && !m_IsRetreating)
                     state = AIState.Patrol;
                 break;
 
             case AIState.Attack:
-                if (distToPlayer > attackRange * 1.2f)
+                var loseAttackRange = attackRange * 1.2f;
+                if (robotType == RobotType.A3_Tactician)
+                    loseAttackRange = 25f * 1.2f;
+
+                if (distToPlayer > loseAttackRange || (robotType == RobotType.A3_Tactician && m_IsRetreating))
                 {
                     state = AIState.Chase;
+                    if (robotType == RobotType.A3_Tactician)
+                        m_IsFlanking = false;
                 }
                 else
                 {
-                    m_ShootTimer += deltaTime;
-                    if (m_ShootTimer >= m_ShootInterval)
+                    if (robotType == RobotType.A3_Tactician)
                     {
-                        m_ShootTimer = 0;
-                        m_FireThisTick = true;
-                        if (UnityEngine.Random.value <= m_HitChance)
-                            onShootPlayer?.Invoke(robotType == RobotType.A2_Hunter ? 14 : 8);
+                        UpdateStrafe(deltaTime);
+                        UpdateTacticianBurstFire(deltaTime, onShootPlayer);
+                    }
+                    else
+                    {
+                        m_ShootTimer += deltaTime;
+                        if (m_ShootTimer >= m_ShootInterval)
+                        {
+                            m_ShootTimer = 0;
+                            m_FireThisTick = true;
+                            if (UnityEngine.Random.value <= m_HitChance)
+                                onShootPlayer?.Invoke(robotType == RobotType.A2_Hunter ? 14 : 8);
+                        }
                     }
                 }
                 break;
@@ -159,6 +258,71 @@ public class AIController
     public void BindCharacter(PlayerState playerState)
     {
         m_PlayerState = playerState;
+    }
+
+    void StartStrafe()
+    {
+        m_StrafeDirection = UnityEngine.Random.value > 0.5f ? 1f : -1f;
+        m_StrafeTimer = UnityEngine.Random.Range(0.8f, 2.0f);
+    }
+
+    void UpdateStrafe(float deltaTime)
+    {
+        m_StrafeTimer -= deltaTime;
+        if (m_StrafeTimer <= 0f)
+            StartStrafe();
+    }
+
+    void UpdateTacticianBurstFire(float deltaTime, System.Action<float> onShootPlayer)
+    {
+        if (m_BurstPauseTimer > 0f)
+        {
+            m_BurstPauseTimer -= deltaTime;
+            return;
+        }
+
+        if (m_BurstShotsRemaining <= 0)
+        {
+            m_BurstShotsRemaining = UnityEngine.Random.Range(3, 6);
+            m_ShootTimer = 0f;
+        }
+
+        m_ShootTimer += deltaTime;
+        var burstInterval = Mathf.Max(0.12f, m_ShootInterval * 0.3f);
+        if (m_ShootTimer >= burstInterval)
+        {
+            m_ShootTimer = 0f;
+            m_BurstShotsRemaining--;
+            m_FireThisTick = true;
+
+            if (UnityEngine.Random.value <= m_HitChance)
+                onShootPlayer?.Invoke(12);
+
+            if (m_BurstShotsRemaining <= 0)
+                m_BurstPauseTimer = m_ShootInterval * UnityEngine.Random.Range(1.2f, 2.0f);
+        }
+    }
+
+    void UpdateFlank(float deltaTime, Vector3 playerPos, float distToPlayer)
+    {
+        m_FlankTimer -= deltaTime;
+
+        if (m_FlankTimer <= 0f)
+        {
+            m_IsFlanking = distToPlayer > 12f && UnityEngine.Random.value < 0.35f;
+            if (m_IsFlanking)
+            {
+                var toPlayer = (playerPos - m_Position).normalized;
+                var side = UnityEngine.Random.value > 0.5f ? 1f : -1f;
+                var flankDirection = Quaternion.Euler(0f, side * UnityEngine.Random.Range(45f, 75f), 0f) * toPlayer;
+                m_FlankTarget = playerPos + flankDirection * distToPlayer * 0.6f;
+                m_FlankTimer = UnityEngine.Random.Range(2f, 4f);
+            }
+            else
+            {
+                m_FlankTimer = UnityEngine.Random.Range(1f, 2.5f);
+            }
+        }
     }
 
     public void ResetSpawnPosition(Vector3 position)
@@ -213,9 +377,7 @@ public class AIController
             {
                 var healthState = entityManager.GetComponentData<HealthStateData>(entity);
                 healthState.maxHealth = maxHealth;
-                healthState.health = healthState.health > 0f
-                    ? Mathf.Min(healthState.health, maxHealth)
-                    : maxHealth;
+                healthState.health = maxHealth;
                 entityManager.SetComponentData(entity, healthState);
                 if (entityManager.HasComponent<HitCollisionOwnerData>(entity))
                 {
@@ -346,7 +508,7 @@ public class AIController
         commandComponent.command.renderTick = tick;
         commandComponent.command.lookYaw = DesiredLookYaw;
         commandComponent.command.lookPitch = DesiredLookPitch;
-        commandComponent.command.moveYaw = 0f;
+        commandComponent.command.moveYaw = DesiredMoveYaw;
         commandComponent.command.moveMagnitude = DesiredMoveMagnitude;
         commandComponent.command.buttons.Set(UserCommand.Button.PrimaryFire, m_FireThisTick);
         commandComponent.command.emote = CharacterEmote.None;
@@ -379,10 +541,28 @@ public class AIController
         var configuredSpeed = state == AIState.Patrol ? m_MoveSpeed * patrolSpeedFactor : m_MoveSpeed;
         if (m_DetourTimer > 0f && !m_HasDetourTarget && state == AIState.Patrol)
             m_HasPatrolTarget = false;
-        DesiredMoveMagnitude = state == AIState.Attack || state == AIState.Idle ||
-            (m_DetourTimer > 0f && !m_HasDetourTarget)
-                ? 0f
-                : Mathf.Clamp01(configuredSpeed / Mathf.Max(1f, Game.config.playerSpeed));
+
+        if (state == AIState.Idle ||
+            (m_DetourTimer > 0f && !m_HasDetourTarget))
+        {
+            DesiredMoveMagnitude = 0f;
+            DesiredMoveYaw = 0f;
+        }
+        else if (state == AIState.Attack && robotType == RobotType.A3_Tactician)
+        {
+            DesiredMoveMagnitude = Mathf.Clamp01(m_MoveSpeed * 0.6f / Mathf.Max(1f, Game.config.playerSpeed));
+            DesiredMoveYaw = m_StrafeDirection * 90f;
+        }
+        else if (state == AIState.Attack)
+        {
+            DesiredMoveMagnitude = 0f;
+            DesiredMoveYaw = 0f;
+        }
+        else
+        {
+            DesiredMoveMagnitude = Mathf.Clamp01(configuredSpeed / Mathf.Max(1f, Game.config.playerSpeed));
+            DesiredMoveYaw = 0f;
+        }
         WantsFire = m_FireThisTick;
     }
 
@@ -461,7 +641,7 @@ public class AIController
         var desiredDirection = (m_Position - m_LastPosition).normalized;
         if (desiredDirection.sqrMagnitude < 0.01f)
             desiredDirection = Vector3.forward;
-        return FindDetourTarget(desiredDirection, default);
+        return FindDetourTarget(desiredDirection, default(RaycastHit));
     }
 
     Vector3 FindDetourTarget(Vector3 desiredDirection, RaycastHit obstacle)
@@ -510,7 +690,7 @@ public class AIController
 
     static bool TryFindObstacle(Vector3 origin, Vector3 direction, float distance, out RaycastHit obstacle)
     {
-        obstacle = default;
+        obstacle = default(RaycastHit);
         var hits = Physics.RaycastAll(origin, direction, distance, Physics.DefaultRaycastLayers,
             QueryTriggerInteraction.Ignore);
         System.Array.Sort(hits, (left, right) => left.distance.CompareTo(right.distance));
@@ -534,7 +714,9 @@ public class AIController
 
         var color = robotType == RobotType.A1_Infantry
             ? new Color(0.85f, 0.18f, 0.18f)
-            : new Color(0.58f, 0.18f, 0.85f);
+            : robotType == RobotType.A3_Tactician
+                ? new Color(0.95f, 0.75f, 0.1f)
+                : new Color(0.58f, 0.18f, 0.85f);
 
         foreach (var renderer in m_CharacterObject.GetComponentsInChildren<Renderer>())
         {

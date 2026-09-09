@@ -12,7 +12,7 @@ public enum SinglePlayerState
 
 public class SinglePlayerGameLoop : Game.IGameLoop
 {
-    public enum Mode { Wave, Explore, TestWave, TestExplore }
+    public enum Mode { Wave, Explore, TestWave, TestExplore, AIBattle }
     public enum Difficulty { Easy, Normal, Hard }
 
     // Module references (same as PreviewGameLoop)
@@ -64,6 +64,7 @@ public class SinglePlayerGameLoop : Game.IGameLoop
     DifficultyConfig m_DiffConfig;
     WaveManager m_WaveManager;
     ExploreManager m_ExploreManager;
+    AIBattleManager m_AIBattleManager;
     ScoreManager m_ScoreManager;
     TimerManager m_TimerManager;
     DailyPlayTimeTracker m_PlayTimeTracker;
@@ -84,6 +85,8 @@ public class SinglePlayerGameLoop : Game.IGameLoop
    float m_PlayerHealth;
     float m_ShieldMultiplier = 1f;
     float m_PlayTimeWarningTimer;
+    float m_StartupGraceTimer;
+    const float StartupGracePeriod = 5f;
 
     public bool Init(string[] args)
     {
@@ -99,6 +102,8 @@ public class SinglePlayerGameLoop : Game.IGameLoop
                 m_Mode = Mode.TestWave;
             else if (string.Equals(argument, "test-explore", StringComparison.OrdinalIgnoreCase))
                 m_Mode = Mode.TestExplore;
+            else if (string.Equals(argument, "ai-battle", StringComparison.OrdinalIgnoreCase))
+                m_Mode = Mode.AIBattle;
             else if (string.Equals(argument, "easy", StringComparison.OrdinalIgnoreCase))
                 m_Difficulty = Difficulty.Easy;
             else if (string.Equals(argument, "hard", StringComparison.OrdinalIgnoreCase))
@@ -287,12 +292,15 @@ public class SinglePlayerGameLoop : Game.IGameLoop
        if (m_GameOver) return;
 
         m_PlayTimeWarningTimer = Mathf.Max(0f, m_PlayTimeWarningTimer - Time.unscaledDeltaTime);
-        if (!IsTestMode() && m_PlayTimeTracker.ConsumeTenMinuteWarning())
+        if (!IsPlayTimeExempt() && m_PlayTimeTracker.ConsumeTenMinuteWarning())
             m_PlayTimeWarningTimer = 5f;
 
        // Tick the game loop
        UpdateStateActiveTick();
-        UpdatePlayerLives();
+        if (m_StartupGraceTimer > 0f)
+            m_StartupGraceTimer -= Time.deltaTime;
+        else
+            UpdatePlayerLives();
 
        // Tick global timer
         m_TimerManager.Tick(Time.deltaTime);
@@ -325,25 +333,35 @@ public class SinglePlayerGameLoop : Game.IGameLoop
                m_ExploreManager.GetProgressText(),
                 "");
         }
+        else if (m_Mode == Mode.AIBattle && m_AIBattleManager != null)
+        {
+            m_AIBattleManager.Tick(Time.deltaTime, playerPos, onShootPlayer, m_GameWorld);
+            if (m_StartupGraceTimer <= 0f)
+                CheckAIBattleKills();
+            m_HudUI.UpdateStats(
+                "Lives: " + m_LivesRemaining + "    Score: " + m_ScoreManager.totalScore + "    Time: " + m_TimerManager.GetFormattedTime(),
+                m_AIBattleManager.GetProgressText(),
+                "");
+        }
 
-        m_HudUI.UpdatePlayTimeWarning(!IsTestMode() && m_PlayTimeWarningTimer > 0f
+        m_HudUI.UpdatePlayTimeWarning(!IsPlayTimeExempt() && m_PlayTimeWarningTimer > 0f
             ? m_PlayTimeTracker.GetTenMinuteWarningMessage()
             : string.Empty);
 
         // Check game over
-        if (m_TimerManager.IsExpired)
+        if (m_StartupGraceTimer <= 0f && m_TimerManager.IsExpired)
         {
             OnGameOver("Time's up!");
         }
 
-        if (!IsTestMode() && m_PlayTimeTracker.Record(Time.unscaledDeltaTime, Game.GetMousePointerLock()))
+        if (!IsPlayTimeExempt() && m_PlayTimeTracker.Record(Time.unscaledDeltaTime, Game.GetMousePointerLock()))
             OnGameOver(m_PlayTimeTracker.GetLimitMessage());
     }
 
     void OnRobotKilled(AIController robot)
     {
         var isA2 = robot.robotType == RobotType.A2_Hunter;
-        m_ScoreManager.AddKill(isA2 ? 15 : 10, isA2);
+        m_ScoreManager.AddKill(robot.robotType == RobotType.A3_Tactician ? 50 : isA2 ? 15 : 10, isA2);
     }
 
     void CreateRobotEntity(AIController robot, Vector3 position)
@@ -353,7 +371,8 @@ public class SinglePlayerGameLoop : Game.IGameLoop
 
         var player = m_PlayerModuleServer.CreatePlayer(m_GameWorld, m_NextBotPlayerId++, robot.robotType.ToString(), true);
         player.teamIndex = 1;
-        player.playerName = robot.robotType == RobotType.A1_Infantry ? "A1 Robot" : "A2 Robot";
+        player.playerName = robot.robotType == RobotType.A1_Infantry ? "A1 Robot"
+            : robot.robotType == RobotType.A3_Tactician ? "A3 Tactician" : "A2 Robot";
 
         var playerEntity = player.gameObject.GetComponent<GameObjectEntity>().Entity;
         var entityManager = m_GameWorld.GetEntityManager();
@@ -368,7 +387,7 @@ public class SinglePlayerGameLoop : Game.IGameLoop
 
     void ConfirmSelection(Mode mode, Difficulty difficulty)
     {
-        if (m_GameplayStarted || (!IsTestMode(mode) && m_PlayTimeTracker != null && m_PlayTimeTracker.IsLimitReached)) return;
+        if (m_GameplayStarted || (!IsPlayTimeExempt(mode) && m_PlayTimeTracker != null && m_PlayTimeTracker.IsLimitReached)) return;
 
         m_Mode = mode;
         m_Difficulty = difficulty;
@@ -378,6 +397,7 @@ public class SinglePlayerGameLoop : Game.IGameLoop
         m_PlayerDeathTracked = false;
         m_ScoreManager.Reset();
         m_TimerManager = new TimerManager(IsTestMode(mode) ? 1f : 20f);
+        m_StartupGraceTimer = StartupGracePeriod;
 
         m_SpawnCenter = Vector3.zero;
         foreach (var spawnPoint in UnityEngine.Object.FindObjectsOfType<SpawnPoint>())
@@ -396,7 +416,9 @@ public class SinglePlayerGameLoop : Game.IGameLoop
         m_PowerupManager = new PowerupManager(m_DiffConfig, m_SpawnCenter);
 
         var baseMode = GetBaseMode(mode);
-        if (baseMode == Mode.Wave)
+        if (mode == Mode.AIBattle)
+            m_AIBattleManager = new AIBattleManager(m_DiffConfig, m_SpawnCenter, m_RobotSpawnForward, OnRobotKilled, CreateRobotEntity);
+        else if (baseMode == Mode.Wave)
             m_WaveManager = new WaveManager(m_DiffConfig, m_SpawnCenter, m_RobotSpawnForward, OnRobotKilled, CreateRobotEntity);
         else
             m_ExploreManager = new ExploreManager(m_DiffConfig, m_SpawnCenter, m_RobotSpawnForward, OnRobotKilled, CreateRobotEntity,
@@ -418,6 +440,16 @@ public class SinglePlayerGameLoop : Game.IGameLoop
     public bool IsTestMode()
     {
         return IsTestMode(m_Mode);
+    }
+
+    public static bool IsPlayTimeExempt(Mode mode)
+    {
+        return mode == Mode.TestWave || mode == Mode.TestExplore || mode == Mode.AIBattle;
+    }
+
+    public bool IsPlayTimeExempt()
+    {
+        return IsPlayTimeExempt(m_Mode);
     }
 
     static Mode GetBaseMode(Mode mode)
@@ -566,6 +598,16 @@ public class SinglePlayerGameLoop : Game.IGameLoop
     {
         if (m_ExploreManager == null) return;
         if (m_ExploreManager.IsVictory())
+        {
+            m_ScoreManager.AddWaveBonus();
+            OnGameOver("Victory!");
+        }
+    }
+
+    void CheckAIBattleKills()
+    {
+        if (m_AIBattleManager == null) return;
+        if (m_AIBattleManager.IsVictory())
         {
             m_ScoreManager.AddWaveBonus();
             OnGameOver("Victory!");
@@ -739,3 +781,5 @@ public class SinglePlayerGameLoop : Game.IGameLoop
         GameDebug.Log($"Score: {m_ScoreManager.totalScore} | Kills: {m_ScoreManager.killCount} | Combo: x{m_ScoreManager.currentCombo} | Time: {m_TimerManager.GetFormattedTime()}");
     }
 }
+
+

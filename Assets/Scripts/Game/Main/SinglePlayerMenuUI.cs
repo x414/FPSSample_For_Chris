@@ -12,12 +12,15 @@ public class SinglePlayerMenuUI : MonoBehaviour
     Button[] m_DifficultyButtons;
     Button m_StartButton;
     Text m_PlayTimeText;
+    GameObject m_PasswordGroup;
+    InputField m_PasswordInput;
+    Text m_PasswordErrorText;
     int m_ModeIndex;
     int m_TestModeIndex;
     int m_DifficultyIndex = 0;
     bool m_StartLocked;
 
-    readonly string[] m_ModeNames = { "Wave", "Explore", "Test" };
+    readonly string[] m_ModeNames = { "Wave", "Explore", "Test", "AI" };
     readonly string[] m_TestModeNames = { "Explore", "Wave" };
     readonly string[] m_DifficultyNames = { "Easy", "Normal", "Hard" };
 
@@ -49,14 +52,16 @@ public class SinglePlayerMenuUI : MonoBehaviour
         m_ModeButtons = new Button[m_ModeNames.Length];
         for (int i = 0; i < m_ModeNames.Length; i++)
         {
-            var x = (i - 1) * 170f;
+            var x = (i - 1.5f) * 140f;
             var index = i;
-            m_ModeButtons[i] = CreateButton(panel.transform, m_ModeNames[i], new Vector2(x, 110f), new Vector2(155f, 60f), font, () =>
+            m_ModeButtons[i] = CreateButton(panel.transform, m_ModeNames[i], new Vector2(x, 110f), new Vector2(130f, 60f), font, () =>
             {
                 m_ModeIndex = index;
                 UpdateSelectionColors();
             });
         }
+
+        CreatePasswordInput(panel.transform, font);
 
         CreateText(panel.transform, "Test Mode", 24, TextAnchor.MiddleLeft, new Vector2(0f, 45f), new Vector2(440f, 32f), Color.white, font);
         m_TestModeButtons = new Button[m_TestModeNames.Length];
@@ -87,6 +92,43 @@ public class SinglePlayerMenuUI : MonoBehaviour
         m_StartButton = CreateButton(panel.transform, "Start Game", new Vector2(0f, -220f), new Vector2(360f, 70f), font, StartGame);
         m_PlayTimeText = CreateText(panel.transform, "", 21, TextAnchor.MiddleCenter, new Vector2(0f, -270f), new Vector2(440f, 32f), new Color(0.95f, 0.9f, 0.7f), font);
         UpdateSelectionColors();
+    }
+
+    void CreatePasswordInput(Transform panel, Font font)
+    {
+        m_PasswordGroup = new GameObject("PasswordGroup");
+        m_PasswordGroup.transform.SetParent(panel, false);
+
+        CreateText(m_PasswordGroup.transform, "Password", 20, TextAnchor.MiddleLeft, new Vector2(0f, 10f), new Vector2(440f, 28f), new Color(0.9f, 0.85f, 0.5f), font);
+
+        var inputObject = new GameObject("PasswordInput", typeof(Image), typeof(InputField));
+        inputObject.transform.SetParent(m_PasswordGroup.transform, false);
+        var inputRect = inputObject.GetComponent<RectTransform>();
+        inputRect.sizeDelta = new Vector2(280f, 42f);
+        inputRect.anchoredPosition = new Vector2(0f, -25f);
+        inputObject.GetComponent<Image>().color = new Color(0.15f, 0.15f, 0.2f);
+
+        m_PasswordInput = inputObject.GetComponent<InputField>();
+        m_PasswordInput.contentType = InputField.ContentType.Password;
+        m_PasswordInput.characterLimit = 8;
+        m_PasswordInput.text = "";
+
+        var inputTextObject = new GameObject("Text", typeof(Text));
+        inputTextObject.transform.SetParent(inputObject.transform, false);
+        var inputTextRect = inputTextObject.GetComponent<RectTransform>();
+        inputTextRect.sizeDelta = new Vector2(260f, 36f);
+        inputTextRect.anchoredPosition = Vector2.zero;
+        var inputText = inputTextObject.GetComponent<Text>();
+        inputText.font = font;
+        inputText.fontSize = 22;
+        inputText.alignment = TextAnchor.MiddleCenter;
+        inputText.color = Color.white;
+        m_PasswordInput.textComponent = inputText;
+        m_PasswordInput.placeholder = null;
+
+        m_PasswordErrorText = CreateText(m_PasswordGroup.transform, "", 18, TextAnchor.MiddleCenter, new Vector2(0f, -60f), new Vector2(440f, 26f), new Color(1f, 0.3f, 0.3f), font);
+
+        m_PasswordGroup.SetActive(false);
     }
 
     void Start()
@@ -159,6 +201,16 @@ public class SinglePlayerMenuUI : MonoBehaviour
             m_TestModeButtons[i].image.color = i == m_TestModeIndex ? new Color(0.2f, 0.6f, 0.2f) : new Color(0.15f, 0.15f, 0.2f);
         }
 
+        if (m_PasswordGroup != null)
+        {
+            m_PasswordGroup.SetActive(m_ModeIndex == 3);
+            if (m_ModeIndex != 3)
+            {
+                m_PasswordInput.text = "";
+                m_PasswordErrorText.text = "";
+            }
+        }
+
         for (int i = 0; i < m_DifficultyButtons.Length; i++)
             m_DifficultyButtons[i].image.color = i == m_DifficultyIndex ? new Color(0.2f, 0.6f, 0.2f) : new Color(0.15f, 0.15f, 0.2f);
     }
@@ -179,9 +231,21 @@ public class SinglePlayerMenuUI : MonoBehaviour
         Console.SetOpen(false);
         if (m_OnStart != null)
         {
-            var mode = IsTestModeSelected()
-                ? (m_TestModeIndex == 0 ? SinglePlayerGameLoop.Mode.TestExplore : SinglePlayerGameLoop.Mode.TestWave)
-                : (m_ModeIndex == 0 ? SinglePlayerGameLoop.Mode.Wave : SinglePlayerGameLoop.Mode.Explore);
+            SinglePlayerGameLoop.Mode mode;
+            if (m_ModeIndex == 3)
+            {
+                if (m_PasswordInput == null || m_PasswordInput.text != "0909")
+                {
+                    if (m_PasswordErrorText != null)
+                        m_PasswordErrorText.text = "Wrong password";
+                    return;
+                }
+                mode = SinglePlayerGameLoop.Mode.AIBattle;
+            }
+            else if (IsTestModeSelected())
+                mode = m_TestModeIndex == 0 ? SinglePlayerGameLoop.Mode.TestExplore : SinglePlayerGameLoop.Mode.TestWave;
+            else
+                mode = m_ModeIndex == 0 ? SinglePlayerGameLoop.Mode.Wave : SinglePlayerGameLoop.Mode.Explore;
             m_OnStart(mode, (SinglePlayerGameLoop.Difficulty)m_DifficultyIndex);
         }
     }
