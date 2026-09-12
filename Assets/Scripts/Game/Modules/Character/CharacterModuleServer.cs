@@ -224,6 +224,27 @@ public class HandleDamage : BaseComponentSystem
             var entity = entityArray[i]; 
             var collOwner = collOwnerArray[i];
 
+            if (SinglePlayerGameLoop.suppressRealPlayerDamage &&
+                entity == SinglePlayerGameLoop.redirectedPlayerEntity)
+            {
+                var incomingDamage = EntityManager.GetBuffer<DamageEvent>(entity);
+                var redirectedDamage = 0f;
+                for (var eventIndex = 0; eventIndex < incomingDamage.Length; eventIndex++)
+                    redirectedDamage += incomingDamage[eventIndex].damage;
+
+                incomingDamage.Clear();
+                if (redirectedDamage > 0f)
+                    SinglePlayerGameLoop.redirectedPlayerDamage?.Invoke(redirectedDamage);
+
+                if (SinglePlayerGameLoop.redirectedPlayerVisualHealth != null)
+                {
+                    var visualHealth = SinglePlayerGameLoop.redirectedPlayerVisualHealth();
+                    healthState.health = visualHealth;
+                    EntityManager.SetComponentData(entity, healthState);
+                }
+                continue;
+            }
+
             var isDamaged = false;
             var impulseVec = Vector3.zero;
             var damage = 0.0f;

@@ -9,9 +9,13 @@ public enum SinglePlayerState
     Loading,
     Active
 }
-
 public class SinglePlayerGameLoop : Game.IGameLoop
 {
+    public static bool suppressRealPlayerDamage;
+    public static System.Action<float> redirectedPlayerDamage;
+    public static Entity redirectedPlayerEntity;
+    public static System.Func<int> redirectedPlayerVisualHealth;
+
     public enum Mode { Wave, Explore, TestWave, TestExplore, AIBattle }
     public enum Difficulty { Easy, Normal, Hard }
 
@@ -142,6 +146,10 @@ public class SinglePlayerGameLoop : Game.IGameLoop
 
     public void Shutdown()
     {
+       suppressRealPlayerDamage = false;
+       redirectedPlayerDamage = null;
+       redirectedPlayerVisualHealth = null;
+       redirectedPlayerEntity = Entity.Null;
         if (m_PlayTimeTracker != null)
             m_PlayTimeTracker.Flush();
 
@@ -213,6 +221,7 @@ public class SinglePlayerGameLoop : Game.IGameLoop
         var charControl = m_GameWorld.GetEntityManager().GetComponentObject<PlayerCharacterControl>(playerEntity);
         charControl.characterType = math.max(Game.characterType.IntValue, 0);
         m_Player.teamIndex = 0;
+       redirectedPlayerEntity = playerEntity;
 
        m_previewGameMode = m_GameWorld.GetECSWorld().CreateManager<PreviewGameMode>(m_GameWorld, m_Player);
         m_previewGameMode.respawnDelay = 1;
@@ -291,15 +300,18 @@ public class SinglePlayerGameLoop : Game.IGameLoop
 
        if (m_GameOver) return;
 
-        m_PlayTimeWarningTimer = Mathf.Max(0f, m_PlayTimeWarningTimer - Time.unscaledDeltaTime);
-        if (!IsPlayTimeExempt() && m_PlayTimeTracker.ConsumeTenMinuteWarning())
+       if (m_Player != null)
+           redirectedPlayerEntity = m_Player.controlledEntity;
+
+       m_PlayTimeWarningTimer = Mathf.Max(0f, m_PlayTimeWarningTimer - Time.unscaledDeltaTime);
+        if (m_PlayTimeTracker.ConsumeTenMinuteWarning())
             m_PlayTimeWarningTimer = 5f;
 
        // Tick the game loop
        UpdateStateActiveTick();
         if (m_StartupGraceTimer > 0f)
             m_StartupGraceTimer -= Time.deltaTime;
-        else
+       else if (m_Mode != Mode.AIBattle)
             UpdatePlayerLives();
 
        // Tick global timer
@@ -333,8 +345,14 @@ public class SinglePlayerGameLoop : Game.IGameLoop
                m_ExploreManager.GetProgressText(),
                 "");
         }
-        else if (m_Mode == Mode.AIBattle && m_AIBattleManager != null)
+        else if (m_Mode == Mode.AIBattle)
         {
+            if (m_AIBattleManager == null && playerPos != Vector3.zero)
+                m_AIBattleManager = new AIBattleManager(m_DiffConfig, playerPos, m_RobotSpawnForward, OnRobotKilled, CreateRobotEntity);
+
+            if (m_AIBattleManager == null)
+                return;
+
             m_AIBattleManager.Tick(Time.deltaTime, playerPos, onShootPlayer, m_GameWorld);
             if (m_StartupGraceTimer <= 0f)
                 CheckAIBattleKills();
@@ -342,9 +360,10 @@ public class SinglePlayerGameLoop : Game.IGameLoop
                 "Lives: " + m_LivesRemaining + "    Score: " + m_ScoreManager.totalScore + "    Time: " + m_TimerManager.GetFormattedTime(),
                 m_AIBattleManager.GetProgressText(),
                 "");
+            m_HudUI.UpdatePlayerHealth(m_PlayerHealth, m_DiffConfig.playerMaxHealth);
         }
 
-        m_HudUI.UpdatePlayTimeWarning(!IsPlayTimeExempt() && m_PlayTimeWarningTimer > 0f
+        m_HudUI.UpdatePlayTimeWarning(m_PlayTimeWarningTimer > 0f
             ? m_PlayTimeTracker.GetTenMinuteWarningMessage()
             : string.Empty);
 
@@ -354,7 +373,9 @@ public class SinglePlayerGameLoop : Game.IGameLoop
             OnGameOver("Time's up!");
         }
 
-        if (!IsPlayTimeExempt() && m_PlayTimeTracker.Record(Time.unscaledDeltaTime, Game.GetMousePointerLock()))
+        m_PlayTimeTracker.Record(Time.unscaledDeltaTime, Game.GetMousePointerLock());
+        bool isPlayTimeLimited = !IsTestMode() && m_Mode != Mode.AIBattle;
+        if (isPlayTimeLimited && m_PlayTimeTracker.IsLimitReached)
             OnGameOver(m_PlayTimeTracker.GetLimitMessage());
     }
 
@@ -387,16 +408,22 @@ public class SinglePlayerGameLoop : Game.IGameLoop
 
     void ConfirmSelection(Mode mode, Difficulty difficulty)
     {
-        if (m_GameplayStarted || (!IsPlayTimeExempt(mode) && m_PlayTimeTracker != null && m_PlayTimeTracker.IsLimitReached)) return;
+        if (m_GameplayStarted) return;
+        bool isQuickMode = IsTestMode(mode) || mode == Mode.AIBattle;
+        if (!isQuickMode && m_PlayTimeTracker != null && m_PlayTimeTracker.IsLimitReached) return;
 
         m_Mode = mode;
         m_Difficulty = difficulty;
        m_DiffConfig = DifficultyConfig.GetConfig(difficulty.ToString());
+       suppressRealPlayerDamage = mode == Mode.AIBattle;
+       redirectedPlayerDamage = mode == Mode.AIBattle ? (System.Action<float>)OnPlayerHit : null;
+       redirectedPlayerVisualHealth = mode == Mode.AIBattle ? (System.Func<int>)GetPlayerVisualHealth : null;
        m_LivesRemaining = m_DiffConfig.maxLives;
        m_PlayerHealth = m_DiffConfig.playerMaxHealth;
         m_PlayerDeathTracked = false;
         m_ScoreManager.Reset();
-        m_TimerManager = new TimerManager(IsTestMode(mode) ? 1f : 20f);
+        bool useShortTimer = IsTestMode(mode) || (mode == Mode.AIBattle && m_PlayTimeTracker != null && m_PlayTimeTracker.IsLimitReached);
+        m_TimerManager = new TimerManager(useShortTimer ? 1f : 20f);
         m_StartupGraceTimer = StartupGracePeriod;
 
         m_SpawnCenter = Vector3.zero;
@@ -440,16 +467,6 @@ public class SinglePlayerGameLoop : Game.IGameLoop
     public bool IsTestMode()
     {
         return IsTestMode(m_Mode);
-    }
-
-    public static bool IsPlayTimeExempt(Mode mode)
-    {
-        return mode == Mode.TestWave || mode == Mode.TestExplore || mode == Mode.AIBattle;
-    }
-
-    public bool IsPlayTimeExempt()
-    {
-        return IsPlayTimeExempt(m_Mode);
     }
 
     static Mode GetBaseMode(Mode mode)
@@ -543,9 +560,14 @@ public class SinglePlayerGameLoop : Game.IGameLoop
        if (m_PlayerHealth <= 0)
        {
            m_PlayerHealth = 0;
-           // Respawn after 3s with score penalty
            m_ScoreManager.ApplyPenalty(0.8f);
            m_PlayerHealth = m_DiffConfig.playerMaxHealth;
+           if (m_Mode == Mode.AIBattle)
+           {
+               m_LivesRemaining--;
+               if (m_LivesRemaining <= 0)
+                   OnGameOver("Out of lives!");
+           }
            GameDebug.Log("Player down! Lives remaining: " + m_LivesRemaining + ". Respawning...");
        }
         else
@@ -553,6 +575,11 @@ public class SinglePlayerGameLoop : Game.IGameLoop
             // Passive health regen
             m_PlayerHealth = Mathf.Min(m_PlayerHealth + m_DiffConfig.playerHealthRegen * Time.deltaTime, m_DiffConfig.playerMaxHealth);
         }
+    }
+
+    int GetPlayerVisualHealth()
+    {
+        return Mathf.CeilToInt(m_PlayerHealth);
     }
 
     void UpdatePlayerLives()
@@ -781,5 +808,3 @@ public class SinglePlayerGameLoop : Game.IGameLoop
         GameDebug.Log($"Score: {m_ScoreManager.totalScore} | Kills: {m_ScoreManager.killCount} | Combo: x{m_ScoreManager.currentCombo} | Time: {m_TimerManager.GetFormattedTime()}");
     }
 }
-
-

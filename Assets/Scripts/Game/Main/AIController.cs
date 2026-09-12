@@ -52,6 +52,12 @@ public class AIController
     GameObject m_CharacterObject;
     bool m_EntityHealthInitialized;
     bool m_FireThisTick;
+    bool m_HasPlannedAim;
+    Vector3 m_PlannedAimDirection;
+    Vector3 m_PreviousPlayerPosition;
+    bool m_HasPreviousPlayerPosition;
+    float m_PlayerStationaryTime;
+    int m_TacticianMissedShotStreak;
 
     // A3 Tactician behavior fields
     float m_StrafeTimer;
@@ -116,6 +122,9 @@ public class AIController
 
         float distToPlayer = Vector3.Distance(m_Position, playerPos);
         m_FireThisTick = false;
+        m_HasPlannedAim = false;
+        UpdatePlayerMovementProfile(playerPos, deltaTime);
+        var canSeePlayer = CanSeePlayer(playerPos, distToPlayer);
         UpdateStuckState(deltaTime);
 
         if (robotType == RobotType.A3_Tactician && !m_HasReacted && distToPlayer < m_DetectionRadius)
@@ -175,7 +184,7 @@ public class AIController
                     PatrolUpdate(deltaTime);
                 else
                 {
-                    if (distToPlayer < m_DetectionRadius && CanSeePlayer(playerPos, distToPlayer))
+                    if (distToPlayer < m_DetectionRadius && canSeePlayer)
                         state = AIState.Chase;
                     else
                         PatrolUpdate(deltaTime);
@@ -235,7 +244,7 @@ public class AIController
                     if (robotType == RobotType.A3_Tactician)
                     {
                         UpdateStrafe(deltaTime);
-                        UpdateTacticianBurstFire(deltaTime, onShootPlayer);
+                        UpdateTacticianBurstFire(deltaTime, onShootPlayer, playerPos, distToPlayer, canSeePlayer);
                     }
                     else
                     {
@@ -273,7 +282,8 @@ public class AIController
             StartStrafe();
     }
 
-    void UpdateTacticianBurstFire(float deltaTime, System.Action<float> onShootPlayer)
+    void UpdateTacticianBurstFire(float deltaTime, System.Action<float> onShootPlayer,
+        Vector3 playerPos, float distanceToPlayer, bool canSeePlayer)
     {
         if (m_BurstPauseTimer > 0f)
         {
@@ -295,12 +305,73 @@ public class AIController
             m_BurstShotsRemaining--;
             m_FireThisTick = true;
 
-            if (UnityEngine.Random.value <= m_HitChance)
-                onShootPlayer?.Invoke(12);
+            var hitChance = CalculateTacticianHitChance(distanceToPlayer, canSeePlayer);
+            var didHit = UnityEngine.Random.value <= hitChance;
+            var eyePosition = m_Position + Vector3.up * 1.5f;
+            var targetPosition = playerPos + Vector3.up * 1.2f;
+            m_PlannedAimDirection = (targetPosition - eyePosition).normalized;
+
+            if (didHit)
+                m_TacticianMissedShotStreak = 0;
+            else if (canSeePlayer)
+                m_TacticianMissedShotStreak++;
+
+            if (!canSeePlayer)
+                m_PlannedAimDirection = Quaternion.AngleAxis(
+                    Mathf.Atan2(0.9f, Mathf.Max(1f, distanceToPlayer)) * Mathf.Rad2Deg *
+                    UnityEngine.Random.Range(1.05f, 1.35f) *
+                    (UnityEngine.Random.value > 0.5f ? 1f : -1f),
+                    Vector3.up) * m_PlannedAimDirection;
+            else if (!didHit)
+                m_PlannedAimDirection = Quaternion.AngleAxis(
+                    Mathf.Atan2(1.0f, Mathf.Max(1f, distanceToPlayer)) * Mathf.Rad2Deg *
+                    UnityEngine.Random.Range(1.1f, 1.45f) *
+                    (UnityEngine.Random.value > 0.5f ? 1f : -1f),
+                    Vector3.up) * m_PlannedAimDirection;
+
+            m_HasPlannedAim = true;
 
             if (m_BurstShotsRemaining <= 0)
                 m_BurstPauseTimer = m_ShootInterval * UnityEngine.Random.Range(1.2f, 2.0f);
         }
+    }
+
+    void UpdatePlayerMovementProfile(Vector3 playerPos, float deltaTime)
+    {
+        if (m_HasPreviousPlayerPosition)
+        {
+            var movement = Vector3.Distance(playerPos, m_PreviousPlayerPosition);
+            var isStationary = movement <= Mathf.Max(0.04f, Game.config.playerSpeed * deltaTime * 0.12f);
+            m_PlayerStationaryTime = isStationary ? m_PlayerStationaryTime + deltaTime : 0f;
+        }
+
+        m_PreviousPlayerPosition = playerPos;
+        m_HasPreviousPlayerPosition = true;
+    }
+
+    float CalculateTacticianHitChance(float distanceToPlayer, bool canSeePlayer)
+    {
+        if (!canSeePlayer)
+            return 0f;
+
+        if (m_PlayerStationaryTime > 1.5f)
+            return 1f;
+
+        if (m_TacticianMissedShotStreak >= 8)
+            return 1f;
+
+        var distanceFactor = Mathf.Lerp(1.45f, 0.8f, Mathf.Clamp01(distanceToPlayer / 25f));
+        var effectiveHitChance = m_HitChance * distanceFactor;
+        effectiveHitChance += Mathf.Min(0.12f * Mathf.Max(0, m_TacticianMissedShotStreak - 2), 0.48f);
+
+        if (m_PlayerStationaryTime > 0.6f)
+            effectiveHitChance += 0.18f;
+        if (distanceToPlayer < 8f)
+            effectiveHitChance += 0.15f;
+        else if (distanceToPlayer < 15f)
+            effectiveHitChance += 0.07f;
+
+        return Mathf.Clamp(effectiveHitChance, 0.05f, 0.9f);
     }
 
     void UpdateFlank(float deltaTime, Vector3 playerPos, float distToPlayer)
@@ -535,8 +606,10 @@ public class AIController
             DesiredLookYaw = Mathf.MoveTowardsAngle(DesiredLookYaw, targetYaw, 270f * deltaTime);
         }
 
-        Vector3 aimDirection = playerPos + Vector3.up * 1.2f - (m_Position + Vector3.up * 1.5f);
-        DesiredLookPitch = Mathf.Clamp(90f + Mathf.Atan2(aimDirection.y, new Vector2(aimDirection.x, aimDirection.z).magnitude) * Mathf.Rad2Deg, 0f, 180f);
+        var aimDirection = m_HasPlannedAim
+            ? m_PlannedAimDirection
+            : playerPos + Vector3.up * 1.2f - (m_Position + Vector3.up * 1.5f);
+        DesiredLookPitch = Mathf.Clamp(90f - Mathf.Atan2(aimDirection.y, new Vector2(aimDirection.x, aimDirection.z).magnitude) * Mathf.Rad2Deg, 0f, 180f);
 
         var configuredSpeed = state == AIState.Patrol ? m_MoveSpeed * patrolSpeedFactor : m_MoveSpeed;
         if (m_DetourTimer > 0f && !m_HasDetourTarget && state == AIState.Patrol)

@@ -12,6 +12,7 @@ public class SinglePlayerMenuUI : MonoBehaviour
     Button[] m_DifficultyButtons;
     Button m_StartButton;
     Text m_PlayTimeText;
+    GameObject m_TestModeGroup;
     GameObject m_PasswordGroup;
     InputField m_PasswordInput;
     Text m_PasswordErrorText;
@@ -45,16 +46,16 @@ public class SinglePlayerMenuUI : MonoBehaviour
         }
 
         var font = Resources.GetBuiltinResource<Font>("Arial.ttf");
-        var panel = CreatePanel(canvasObject.transform, new Vector2(0f, 0f), new Vector2(560f, 620f), new Color(0f, 0f, 0f, 0.75f));
-        CreateText(panel.transform, "Single Player", 36, TextAnchor.UpperCenter, new Vector2(0f, 225f), new Vector2(460f, 50f), Color.white, font);
-        CreateText(panel.transform, "Mode", 24, TextAnchor.MiddleLeft, new Vector2(0f, 160f), new Vector2(440f, 32f), Color.white, font);
+        var panel = CreatePanel(canvasObject.transform, new Vector2(0f, 0f), new Vector2(560f, 660f), new Color(0f, 0f, 0f, 0.75f));
+        CreateText(panel.transform, "Single Player", 36, TextAnchor.UpperCenter, new Vector2(0f, 290f), new Vector2(460f, 50f), Color.white, font);
+        CreateText(panel.transform, "Mode", 24, TextAnchor.MiddleLeft, new Vector2(0f, 230f), new Vector2(440f, 32f), Color.white, font);
 
         m_ModeButtons = new Button[m_ModeNames.Length];
         for (int i = 0; i < m_ModeNames.Length; i++)
         {
             var x = (i - 1.5f) * 140f;
             var index = i;
-            m_ModeButtons[i] = CreateButton(panel.transform, m_ModeNames[i], new Vector2(x, 110f), new Vector2(130f, 60f), font, () =>
+            m_ModeButtons[i] = CreateButton(panel.transform, m_ModeNames[i], new Vector2(x, 185f), new Vector2(130f, 60f), font, () =>
             {
                 m_ModeIndex = index;
                 UpdateSelectionColors();
@@ -63,49 +64,51 @@ public class SinglePlayerMenuUI : MonoBehaviour
 
         CreatePasswordInput(panel.transform, font);
 
-        CreateText(panel.transform, "Test Mode", 24, TextAnchor.MiddleLeft, new Vector2(0f, 45f), new Vector2(440f, 32f), Color.white, font);
+        m_TestModeGroup = new GameObject("TestModeGroup", typeof(RectTransform));
+        m_TestModeGroup.transform.SetParent(panel.transform, false);
+        CreateText(m_TestModeGroup.transform, "Test Mode", 24, TextAnchor.MiddleLeft, new Vector2(0f, -35f), new Vector2(440f, 32f), Color.white, font);
         m_TestModeButtons = new Button[m_TestModeNames.Length];
         for (int i = 0; i < m_TestModeNames.Length; i++)
         {
-            var x = i == 0 ? -110f : 110f;
+            var x = i == 0 ? -130f : 130f;
             var index = i;
-            m_TestModeButtons[i] = CreateButton(panel.transform, m_TestModeNames[i], new Vector2(x, -10f), new Vector2(190f, 55f), font, () =>
+            m_TestModeButtons[i] = CreateButton(m_TestModeGroup.transform, m_TestModeNames[i], new Vector2(x, -95f), new Vector2(240f, 55f), font, () =>
             {
                 m_TestModeIndex = index;
                 UpdateSelectionColors();
             });
         }
 
-        CreateText(panel.transform, "Difficulty", 24, TextAnchor.MiddleLeft, new Vector2(0f, -95f), new Vector2(440f, 32f), Color.white, font);
+        CreateText(panel.transform, "Difficulty", 24, TextAnchor.MiddleLeft, new Vector2(0f, 105f), new Vector2(440f, 32f), Color.white, font);
         m_DifficultyButtons = new Button[m_DifficultyNames.Length];
         for (int i = 0; i < m_DifficultyNames.Length; i++)
         {
             var x = (i - 1) * 160f;
             var index = i;
-            m_DifficultyButtons[i] = CreateButton(panel.transform, m_DifficultyNames[i], new Vector2(x, -155f), new Vector2(140f, 60f), font, () =>
+            m_DifficultyButtons[i] = CreateButton(panel.transform, m_DifficultyNames[i], new Vector2(x, 55f), new Vector2(140f, 60f), font, () =>
             {
                 m_DifficultyIndex = index;
                 UpdateSelectionColors();
             });
         }
 
-        m_StartButton = CreateButton(panel.transform, "Start Game", new Vector2(0f, -220f), new Vector2(360f, 70f), font, StartGame);
-        m_PlayTimeText = CreateText(panel.transform, "", 21, TextAnchor.MiddleCenter, new Vector2(0f, -270f), new Vector2(440f, 32f), new Color(0.95f, 0.9f, 0.7f), font);
+        m_StartButton = CreateButton(panel.transform, "Start Game", new Vector2(0f, -275f), new Vector2(360f, 60f), font, StartGame);
+        m_PlayTimeText = CreateText(panel.transform, "", 21, TextAnchor.MiddleCenter, new Vector2(0f, -310f), new Vector2(440f, 28f), new Color(0.95f, 0.9f, 0.7f), font);
         UpdateSelectionColors();
     }
 
     void CreatePasswordInput(Transform panel, Font font)
     {
-        m_PasswordGroup = new GameObject("PasswordGroup");
+        m_PasswordGroup = new GameObject("PasswordGroup", typeof(RectTransform));
         m_PasswordGroup.transform.SetParent(panel, false);
 
-        CreateText(m_PasswordGroup.transform, "Password", 20, TextAnchor.MiddleLeft, new Vector2(0f, 10f), new Vector2(440f, 28f), new Color(0.9f, 0.85f, 0.5f), font);
+        CreateText(m_PasswordGroup.transform, "Password", 20, TextAnchor.MiddleLeft, new Vector2(0f, -150f), new Vector2(440f, 28f), new Color(0.9f, 0.85f, 0.5f), font);
 
         var inputObject = new GameObject("PasswordInput", typeof(Image), typeof(InputField));
         inputObject.transform.SetParent(m_PasswordGroup.transform, false);
         var inputRect = inputObject.GetComponent<RectTransform>();
         inputRect.sizeDelta = new Vector2(280f, 42f);
-        inputRect.anchoredPosition = new Vector2(0f, -25f);
+        inputRect.anchoredPosition = new Vector2(0f, -190f);
         inputObject.GetComponent<Image>().color = new Color(0.15f, 0.15f, 0.2f);
 
         m_PasswordInput = inputObject.GetComponent<InputField>();
@@ -126,7 +129,7 @@ public class SinglePlayerMenuUI : MonoBehaviour
         m_PasswordInput.textComponent = inputText;
         m_PasswordInput.placeholder = null;
 
-        m_PasswordErrorText = CreateText(m_PasswordGroup.transform, "", 18, TextAnchor.MiddleCenter, new Vector2(0f, -60f), new Vector2(440f, 26f), new Color(1f, 0.3f, 0.3f), font);
+        m_PasswordErrorText = CreateText(m_PasswordGroup.transform, "", 18, TextAnchor.MiddleCenter, new Vector2(0f, -225f), new Vector2(440f, 26f), new Color(1f, 0.3f, 0.3f), font);
 
         m_PasswordGroup.SetActive(false);
     }
@@ -145,7 +148,7 @@ public class SinglePlayerMenuUI : MonoBehaviour
         if (m_PlayTimeTracker != null)
         {
             var dailyLimitReached = m_PlayTimeTracker.IsLimitReached;
-            m_PlayTimeText.text = dailyLimitReached && !IsTestModeSelected()
+            m_PlayTimeText.text = dailyLimitReached
                 ? m_PlayTimeTracker.GetLimitMessage()
                 : m_PlayTimeTracker.GetStatusText();
             UpdateDailyLimitState();
@@ -197,14 +200,14 @@ public class SinglePlayerMenuUI : MonoBehaviour
 
         for (int i = 0; i < m_TestModeButtons.Length; i++)
         {
-            m_TestModeButtons[i].gameObject.SetActive(m_ModeIndex == 2);
+            m_TestModeGroup.SetActive(m_ModeIndex == 2);
             m_TestModeButtons[i].image.color = i == m_TestModeIndex ? new Color(0.2f, 0.6f, 0.2f) : new Color(0.15f, 0.15f, 0.2f);
         }
 
         if (m_PasswordGroup != null)
         {
-            m_PasswordGroup.SetActive(m_ModeIndex == 3);
-            if (m_ModeIndex != 3)
+            m_PasswordGroup.SetActive(m_ModeIndex == 2 || m_ModeIndex == 3);
+            if (m_ModeIndex != 2 && m_ModeIndex != 3)
             {
                 m_PasswordInput.text = "";
                 m_PasswordErrorText.text = "";
@@ -218,14 +221,14 @@ public class SinglePlayerMenuUI : MonoBehaviour
     void UpdateDailyLimitState()
     {
         var dailyLimitReached = m_PlayTimeTracker != null && m_PlayTimeTracker.IsLimitReached;
-        m_StartLocked = dailyLimitReached && !IsTestModeSelected();
+        m_StartLocked = dailyLimitReached && m_ModeIndex < 2;
         m_StartButton.interactable = !m_StartLocked;
         m_StartButton.image.color = m_StartLocked ? new Color(0.22f, 0.22f, 0.26f) : new Color(0.15f, 0.15f, 0.2f);
     }
 
     void StartGame()
     {
-        if (m_StartLocked || !IsTestModeSelected() && m_PlayTimeTracker != null && m_PlayTimeTracker.IsLimitReached)
+        if (m_StartLocked || (m_ModeIndex < 2 && m_PlayTimeTracker != null && m_PlayTimeTracker.IsLimitReached))
             return;
 
         Console.SetOpen(false);
@@ -304,7 +307,8 @@ public class SinglePlayerHudUI : MonoBehaviour
    Text m_StatusText;
    Text m_ProgressText;
    Text m_BannerText;
-   Text m_PlayTimeWarningText;
+    Text m_PlayTimeWarningText;
+   Text m_PlayerHealthText;
     void Awake()
     {
         var canvasObject = new GameObject("SinglePlayerHudCanvas", typeof(Canvas), typeof(CanvasScaler));
@@ -326,6 +330,9 @@ public class SinglePlayerHudUI : MonoBehaviour
        var playTimeWarningBackground = CreatePanel(canvasObject.transform, new Vector2(0f, 280f), new Vector2(520f, 54f), new Color(0f, 0f, 0f, 0.65f));
        m_PlayTimeWarningText = CreateText(playTimeWarningBackground.transform, "", 24, TextAnchor.MiddleCenter, Vector2.zero, new Vector2(480f, 34f), new Color(1f, 0.92f, 0.6f), font);
        playTimeWarningBackground.gameObject.SetActive(false);
+
+       var healthBackground = CreatePanel(canvasObject.transform, new Vector2(0f, -300f), new Vector2(360f, 50f), new Color(0f, 0f, 0f, 0.55f));
+       m_PlayerHealthText = CreateText(healthBackground.transform, "", 24, TextAnchor.MiddleCenter, Vector2.zero, new Vector2(320f, 34f), Color.white, font);
     }
 
    public void UpdateStats(string status, string progress, string banner)
@@ -340,6 +347,11 @@ public class SinglePlayerHudUI : MonoBehaviour
    {
        m_PlayTimeWarningText.text = message;
        m_PlayTimeWarningText.transform.parent.gameObject.SetActive(!string.IsNullOrEmpty(message));
+   }
+
+   public void UpdatePlayerHealth(float health, float maxHealth)
+   {
+       m_PlayerHealthText.text = $"HP: {Mathf.CeilToInt(health)} / {Mathf.CeilToInt(maxHealth)}";
    }
 
     Font CreateFont()

@@ -338,7 +338,8 @@ class AutoRifle_Update : BaseComponentDataSystem<CharBehaviour,AbilityControl,Ab
 			var aimDir = (float3)command.lookDir;
 
 			var cross = math.cross(new float3(0, 1, 0),aimDir);
-			var cofAngle = math.radians(predictedState.COF)*0.5f;
+			var isAIBattleRobot = SinglePlayerGameLoop.suppressRealPlayerDamage && character.teamId == 1;
+			var cofAngle = isAIBattleRobot ? 0f : math.radians(predictedState.COF)*0.5f;
 			var direction = math.mul(quaternion.AxisAngle(cross, cofAngle), aimDir);
 
 			// TODO use tick as random seed so server and client calculates same angle for given tick  
@@ -355,7 +356,7 @@ class AutoRifle_Update : BaseComponentDataSystem<CharBehaviour,AbilityControl,Ab
 //            Debug.DrawRay(rayStart, direction * 1000, Color.green, 1.0f);
 
 			const int distance = 500;
-            var collisionMask = ~0U;
+			var collisionMask = ~0U;
 
 			var queryReciever = World.GetExistingManager<RaySphereQueryReciever>();
 			internalState.rayQueryId = queryReciever.RegisterQuery(new RaySphereQueryReciever.Query()
@@ -365,7 +366,7 @@ class AutoRifle_Update : BaseComponentDataSystem<CharBehaviour,AbilityControl,Ab
 				distance = distance,
 				ExcludeOwner = charAbility.character,
 				hitCollisionTestTick = command.renderTick,
-				radius = settings.hitscanRadius,
+				radius = isAIBattleRobot ? 0.55f : settings.hitscanRadius,
 				mask = collisionMask,
 			});
 
@@ -402,10 +403,10 @@ class AutoRifle_HandleCollisionQuery : BaseComponentDataSystem<Ability_AutoRifle
 		float3 endPos;
 
 		var impact = queryResult.hit == 1;
-		if (impact)
-		{
-			var hitCollisionHit = queryResult.hitCollisionOwner != Entity.Null;
-			interpolatedState.impactType = hitCollisionHit
+			if (impact)
+			{
+				var hitCollisionHit = queryResult.hitCollisionOwner != Entity.Null;
+				interpolatedState.impactType = hitCollisionHit
 				? Ability_AutoRifle.ImpactType.Character
 				: Ability_AutoRifle.ImpactType.Environment;
 			endPos = queryResult.hitPoint;
