@@ -78,6 +78,16 @@ public class SinglePlayerGameLoop : Game.IGameLoop
     Vector3 m_SpawnCenter;
     Vector3 m_RobotSpawnForward = Vector3.forward;
     SinglePlayerResultUI m_ResultUI;
+    float m_rocketLastFireTime;
+    bool m_RocketPendingFire;
+    bool m_RocketAimNearest;
+    bool m_RocketAimGround;
+    float m_RocketScoreLogTime;
+    int m_RocketPendingAttempts;
+    float m_RocketNextAttemptTime;
+    int m_RocketBaselineKills;
+    float[] m_RocketShotSchedule;
+    float m_RocketShotBaseTime;
 
    bool m_GameOver;
     bool m_GameplayStarted;
@@ -128,6 +138,7 @@ public class SinglePlayerGameLoop : Game.IGameLoop
         Console.AddCommand("spectator", CmdSpectatorCam, "Select spectator cam", GetHashCode());
         Console.AddCommand("respawn", CmdRespawn, "Force a respawn", GetHashCode());
         Console.AddCommand("score", CmdShowScore, "Show current score", GetHashCode());
+        Console.AddCommand("rocket", CmdFireRocket, "Fire rocket launcher. Optional arg 'nearest' auto-aims at nearest robot; 'ground' aims ahead/down for visual tests", GetHashCode());
 
         Console.SetOpen(false);
 
@@ -302,6 +313,8 @@ public class SinglePlayerGameLoop : Game.IGameLoop
 
        if (m_Player != null)
            redirectedPlayerEntity = m_Player.controlledEntity;
+
+       UpdateRocketLauncher();
 
        m_PlayTimeWarningTimer = Mathf.Max(0f, m_PlayTimeWarningTimer - Time.unscaledDeltaTime);
         if (m_PlayTimeTracker.ConsumeTenMinuteWarning())
@@ -806,5 +819,187 @@ public class SinglePlayerGameLoop : Game.IGameLoop
     void CmdShowScore(string[] args)
     {
         GameDebug.Log($"Score: {m_ScoreManager.totalScore} | Kills: {m_ScoreManager.killCount} | Combo: x{m_ScoreManager.currentCombo} | Time: {m_TimerManager.GetFormattedTime()}");
+    }
+
+    void UpdateRocketLauncher()
+    {
+        if (m_Player == null || m_Player.controlledEntity == Entity.Null) return;
+
+        if (m_RocketScoreLogTime > 0f && Time.time >= m_RocketScoreLogTime)
+        {
+            m_RocketScoreLogTime = 0f;
+            CmdShowScore(null);
+        }
+
+        if (m_RocketShotSchedule != null && m_RocketShotSchedule.Length > 0 &&
+            Time.time - m_RocketShotBaseTime >= m_RocketShotSchedule[0])
+        {
+            Console.EnqueueCommandNoHistory("screenshot");
+            var rest = new float[m_RocketShotSchedule.Length - 1];
+            System.Array.Copy(m_RocketShotSchedule, 1, rest, 0, rest.Length);
+            m_RocketShotSchedule = rest.Length > 0 ? rest : null;
+        }
+
+        if (m_RocketPendingFire)
+        {
+            if (!m_GameplayStarted || m_GameOver) return;
+            if (Time.time < m_RocketNextAttemptTime) return;
+
+            if (m_RocketPendingAttempts > 0)
+            {
+                if (m_ScoreManager.killCount > m_RocketBaselineKills)
+                {
+                    GameDebug.Log($"Rocket test: kill confirmed after {m_RocketPendingAttempts} attempt(s).");
+                    CmdShowScore(null);
+                    m_RocketPendingFire = false;
+                    m_RocketPendingAttempts = 0;
+                    return;
+                }
+                if (m_RocketPendingAttempts >= 30)
+                {
+                    GameDebug.Log("Rocket test: gave up after 30 attempts.");
+                    m_RocketPendingFire = false;
+                    m_RocketPendingAttempts = 0;
+                    return;
+                }
+            }
+
+            m_RocketPendingAttempts++;
+            m_RocketNextAttemptTime = Time.time + 4f;
+            m_rocketLastFireTime = Time.time;
+            GameDebug.Log($"Rocket test attempt {m_RocketPendingAttempts} (aimNearest:{m_RocketAimNearest}).");
+            m_RocketShotSchedule = new float[] { 0.12f, 0.3f, 0.6f, 1.0f, 1.5f };
+            m_RocketShotBaseTime = Time.time;
+            FireRocket(m_RocketAimNearest);
+            return;
+        }
+
+        if (!Game.GetMousePointerLock()) return;
+        if (!Game.Input.GetKeyDown(KeyCode.Q)) return;
+        if (Time.time - m_rocketLastFireTime < 2.0f) return;
+
+        m_rocketLastFireTime = Time.time;
+        GameDebug.Log("Rocket launcher fired via Q key.");
+        FireRocket(false);
+    }
+
+    void CmdFireRocket(string[] args)
+    {
+        m_RocketAimNearest = args != null && args.Length > 0 &&
+            string.Equals(args[0], "nearest", StringComparison.OrdinalIgnoreCase);
+        m_RocketAimGround = args != null && args.Length > 0 &&
+            string.Equals(args[0], "ground", StringComparison.OrdinalIgnoreCase);
+        m_RocketPendingFire = true;
+        m_RocketPendingAttempts = 0;
+        m_RocketNextAttemptTime = 0f;
+        m_RocketBaselineKills = m_ScoreManager != null ? m_ScoreManager.killCount : 0;
+        GameDebug.Log("Rocket fire queued. Waiting for gameplay to start.");
+    }
+
+    void FireRocket(bool aimNearest)
+    {
+        var entityManager = m_GameWorld.GetEntityManager();
+        var playerEntity = m_Player.controlledEntity;
+        if (!entityManager.HasComponent<CharacterPredictedData>(playerEntity))
+        {
+            GameDebug.Log("Rocket aborted: player has no CharacterPredictedData.");
+            return;
+        }
+        if (!entityManager.HasComponent<Character>(playerEntity))
+        {
+            GameDebug.Log("Rocket aborted: player has no Character component.");
+            return;
+        }
+
+        var charPredicted = entityManager.GetComponentData<CharacterPredictedData>(playerEntity);
+        var character = entityManager.GetComponentObject<Character>(playerEntity);
+        var command = entityManager.GetComponentData<UserCommandComponentData>(playerEntity).command;
+
+        float3 eyePos = (float3)charPredicted.position + new float3(0f, character.eyeHeight, 0f);
+        float3 aimDir = command.lookDir;
+
+        if (m_RocketAimGround)
+        {
+            aimDir = math.normalize(aimDir * 0.8f + new float3(0f, -1f, 0f));
+        }
+        else if (aimNearest)
+        {
+            var nearest = FindNearestEnemyCharacter(entityManager, playerEntity, eyePos);
+            if (nearest == Entity.Null)
+            {
+                GameDebug.Log("Rocket aborted: no living enemy character found.");
+                return;
+            }
+            var targetPos = entityManager.GetComponentData<CharacterPredictedData>(nearest).position;
+            aimDir = math.normalize((float3)targetPos + new float3(0f, 1f, 0f) - eyePos);
+        }
+
+        if (math.lengthsq(aimDir) < 0.01f)
+        {
+            GameDebug.Log("Rocket aborted: invalid aim direction.");
+            return;
+        }
+        aimDir = math.normalize(aimDir);
+
+        HandleClientProjectileRequests.SettingsOverride = new ProjectileSettings
+        {
+            velocity = 45f,
+            impactDamage = 999999f,
+            impactImpulse = 50000f,
+            collisionRadius = 0.3f,
+            splashDamage = new SplashDamageSettings
+            {
+                radius = 3f,
+                falloffStartRadius = 1.5f,
+                damage = 999999f,
+                minDamage = 999999f,
+                impulse = 15f,
+                minImpulse = 5f,
+                ownerDamageFraction = 0f,
+            },
+        };
+
+        var requestEntity = entityManager.CreateEntity();
+        entityManager.AddComponentData(requestEntity, new ProjectileRequest
+        {
+            projectileAssetGuid = new WeakAssetReference("0ae4f3eb805dfaa46b0fb17e468206f8"),
+            startTick = m_GameWorld.worldTime.tick,
+            startPosition = eyePos + aimDir * 0.6f,
+            endPosition = eyePos + aimDir * 500f,
+            owner = playerEntity,
+            teamId = character.teamId,
+            collisionTestTickDelay = 0,
+        });
+
+        GameDebug.Log("Rocket projectile launched.");
+        m_RocketScoreLogTime = Time.time + 3f;
+    }
+
+    Entity FindNearestEnemyCharacter(EntityManager entityManager, Entity playerEntity, float3 from)
+    {
+        var best = Entity.Null;
+        var bestDist = float.MaxValue;
+        var entities = entityManager.GetAllEntities();
+        try
+        {
+            for (var i = 0; i < entities.Length; i++)
+            {
+                var e = entities[i];
+                if (e == playerEntity || !entityManager.HasComponent<CharacterPredictedData>(e)) continue;
+                if (entityManager.HasComponent<HealthStateData>(e) &&
+                    entityManager.GetComponentData<HealthStateData>(e).health <= 0f) continue;
+                var dist = math.distance(from, entityManager.GetComponentData<CharacterPredictedData>(e).position);
+                if (dist < bestDist)
+                {
+                    bestDist = dist;
+                    best = e;
+                }
+            }
+        }
+        finally
+        {
+            entities.Dispose();
+        }
+        return best;
     }
 }

@@ -71,6 +71,10 @@ public class AIController
     Vector3 m_FlankTarget;
     bool m_IsRetreating;
     float m_RetreatTimer;
+    float m_LostSightTime;
+    float m_RecoveryCooldown;
+    Vector3 m_RecoveryPosition;
+    bool m_HasRecoveryPosition;
 
     public float DesiredLookYaw { get; private set; }
     public float DesiredLookPitch { get; private set; }
@@ -125,7 +129,7 @@ public class AIController
         m_HasPlannedAim = false;
         UpdatePlayerMovementProfile(playerPos, deltaTime);
         var canSeePlayer = CanSeePlayer(playerPos, distToPlayer);
-        UpdateStuckState(deltaTime);
+        UpdateStuckState(deltaTime, playerPos, distToPlayer, canSeePlayer);
 
         if (robotType == RobotType.A3_Tactician && !m_HasReacted && distToPlayer < m_DetectionRadius)
         {
@@ -215,7 +219,7 @@ public class AIController
                 if (robotType == RobotType.A3_Tactician)
                     effectiveAttackRange = 25f;
 
-                if (distToPlayer < effectiveAttackRange && !m_IsRetreating)
+                if (distToPlayer < effectiveAttackRange && !m_IsRetreating && canSeePlayer)
                 {
                     state = AIState.Attack;
                     m_ShootTimer = 0;
@@ -233,7 +237,8 @@ public class AIController
                 if (robotType == RobotType.A3_Tactician)
                     loseAttackRange = 25f * 1.2f;
 
-                if (distToPlayer > loseAttackRange || (robotType == RobotType.A3_Tactician && m_IsRetreating))
+                if (distToPlayer > loseAttackRange || !canSeePlayer ||
+                    (robotType == RobotType.A3_Tactician && m_IsRetreating))
                 {
                     state = AIState.Chase;
                     if (robotType == RobotType.A3_Tactician)
@@ -519,6 +524,20 @@ public class AIController
             }
         }
 
+        if (m_HasRecoveryPosition && entityManager.HasComponent<Character>(entity))
+        {
+            var character = entityManager.GetComponentObject<Character>(entity);
+            if (!character.m_TeleportPending)
+            {
+                m_HasRecoveryPosition = false;
+                m_Position = m_RecoveryPosition;
+                m_TargetPosition = m_RecoveryPosition;
+                m_LostSightTime = 0f;
+                ClearDetour();
+                character.TeleportTo(m_RecoveryPosition, Quaternion.LookRotation(Vector3.forward));
+            }
+        }
+
         if (m_Position.y < m_PatrolOrigin.y - 15f)
         {
             var recoveredPosition = m_PatrolOrigin + Vector3.up * 0.2f;
@@ -639,9 +658,29 @@ public class AIController
         WantsFire = m_FireThisTick;
     }
 
-    void UpdateStuckState(float deltaTime)
+    void UpdateStuckState(float deltaTime, Vector3 playerPos, float distToPlayer, bool canSeePlayer)
     {
         m_DetourTimer = Mathf.Max(0f, m_DetourTimer - deltaTime);
+        m_RecoveryCooldown = Mathf.Max(0f, m_RecoveryCooldown - deltaTime);
+
+        if (state == AIState.Chase && !m_IsRetreating && !canSeePlayer && distToPlayer < chaseRange)
+        {
+            m_LostSightTime += deltaTime;
+            if (m_LostSightTime >= 3f && m_RecoveryCooldown <= 0f)
+            {
+                if (TryFindRecoveryPosition(playerPos, out m_RecoveryPosition))
+                {
+                    m_HasRecoveryPosition = true;
+                    m_RecoveryCooldown = 4f;
+                    GameDebug.Log($"AI recovery {robotType}: {m_Position} -> {m_RecoveryPosition}");
+                }
+            }
+        }
+        else
+        {
+            m_LostSightTime = 0f;
+        }
+
         if (state == AIState.Attack || state == AIState.Idle || DesiredMoveMagnitude <= 0f)
         {
             m_LastPosition = m_Position;
@@ -759,6 +798,57 @@ public class AIController
         m_DetourTarget = Vector3.zero;
         m_HasDetourTarget = false;
         m_DetourTimer = 0f;
+    }
+
+    bool TryFindRecoveryPosition(Vector3 playerPos, out Vector3 recoveryPosition)
+    {
+        var playerEye = playerPos + Vector3.up * 1.2f;
+        var bestPosition = Vector3.zero;
+        var bestDistance = float.MaxValue;
+
+        for (var distanceIndex = 0; distanceIndex < 3; distanceIndex++)
+        {
+            var radius = 6f + distanceIndex * 3f;
+            for (var step = 0; step < 16; step++)
+            {
+                var angle = step * 22.5f + UnityEngine.Random.Range(-6f, 6f);
+                var direction = Quaternion.AngleAxis(angle, Vector3.up) * Vector3.forward;
+                var candidate = playerPos + direction * radius;
+                candidate.y = playerPos.y;
+
+                if (!IsClearRecoveryPosition(candidate) ||
+                    !HasClearLine(candidate + Vector3.up * 1.5f, playerEye))
+                    continue;
+
+                var candidateDistance = Vector3.Distance(candidate, m_Position);
+                if (candidateDistance < bestDistance)
+                {
+                    bestDistance = candidateDistance;
+                    bestPosition = candidate;
+                }
+            }
+        }
+
+        recoveryPosition = bestPosition;
+        return bestDistance < float.MaxValue;
+    }
+
+    static bool IsClearRecoveryPosition(Vector3 position)
+    {
+        if (!Physics.Raycast(position + Vector3.up * 2f, Vector3.down, 5f,
+            Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
+            return false;
+
+        return !Physics.CheckSphere(position + Vector3.up * 0.8f, 0.55f,
+            Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
+    }
+
+    static bool HasClearLine(Vector3 from, Vector3 to)
+    {
+        var direction = to - from;
+        var distance = direction.magnitude;
+        return distance >= 0.5f && !TryFindObstacle(from, direction / distance,
+            Mathf.Max(0.1f, distance - 0.2f), out _);
     }
 
     static bool TryFindObstacle(Vector3 origin, Vector3 direction, float distance, out RaycastHit obstacle)

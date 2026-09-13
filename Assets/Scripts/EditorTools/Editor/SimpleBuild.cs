@@ -104,9 +104,9 @@ public static class SimpleBuild
     public static void BuildBundlesOnly()
     {
         Debug.Log("Building asset bundles only...");
-        var path = "Build/Windows64/AssetBundles";
+        var path = "Build/Windows64";
         Directory.CreateDirectory(path);
-        BuildTools.BuildBundles(path, BuildTarget.StandaloneWindows64, true, true, false);
+        BuildTools.BuildBundles(path, BuildTarget.StandaloneWindows64, true, false, false);
         Debug.Log("Asset bundles built!");
     }
 }

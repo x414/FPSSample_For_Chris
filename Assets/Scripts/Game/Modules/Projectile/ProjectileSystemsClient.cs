@@ -31,6 +31,8 @@ public struct ClientProjectileOwner : IComponentData
 [DisableAutoCreation]
 public class HandleClientProjectileRequests : BaseComponentSystem
 {
+    public static ProjectileSettings? SettingsOverride;
+
     ComponentGroup RequestGroup;
     readonly GameObject m_SystemRoot;
     readonly BundledResourceManager m_resourceSystem;
@@ -91,6 +93,12 @@ public class HandleClientProjectileRequests : BaseComponentSystem
             
             projectileData.SetupFromRequest(request, registryIndex);
             projectileData.Initialize( projectileRegistry);
+            if (SettingsOverride.HasValue)
+            {
+                projectileData.settings = SettingsOverride.Value;
+                projectileData.maxAge = Vector3.Magnitude(projectileData.endPos - projectileData.startPos) / projectileData.settings.velocity;
+                SettingsOverride = null;
+            }
             EntityManager.SetComponentData(projectileEntity, projectileData);
             EntityManager.AddComponentData(projectileEntity, new PredictedProjectile(request.startTick));
             EntityManager.AddComponentData(projectileEntity, new UpdateProjectileFlag());

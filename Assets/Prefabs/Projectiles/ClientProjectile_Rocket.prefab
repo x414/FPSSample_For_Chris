@@ -9619,6 +9619,7 @@ MonoBehaviour:
   trailRoot: {fileID: 1141498292488440}
   thrustSound: {fileID: 11400000, guid: 0691b027921c6b54fb542f43784d16b8, type: 2}
   rotationSpeed: 5
+  impactEffect: {fileID: 11400000, guid: 7110c14a9d2a35b41bf6706daa0a5535, type: 2}
 --- !u!114 &114219383696029004
 MonoBehaviour:
   m_ObjectHideFlags: 0

@@ -91,6 +91,8 @@ public class HandleProjectileMovementCollisionQuery : BaseComponentSystem
             var projectileVec = projectileData.endPos - projectileData.startPos;
             var projectileDir = Vector3.Normalize(projectileVec);
             var newPosition = (Vector3)projectileData.position + projectileDir * query.distance;
+            var collisionMask = ~(1U << projectileData.teamId);
+            var splashCollisionMask = ~(1 << projectileData.teamId);
 
             var impact = queryResult.hit == 1;
             if (impact)
@@ -99,7 +101,6 @@ public class HandleProjectileMovementCollisionQuery : BaseComponentSystem
                 projectileData.impactPos = queryResult.hitPoint;
                 projectileData.impactNormal = queryResult.hitNormal;
                 projectileData.impactTick = m_world.worldTime.tick;
-
                 // Owner can despawn while projectile is in flight, so we need to make sure we dont send non existing instigator
                 var damageInstigator = EntityManager.Exists(projectileData.projectileOwner) ? projectileData.projectileOwner : Entity.Null;
 
@@ -120,8 +121,7 @@ public class HandleProjectileMovementCollisionQuery : BaseComponentSystem
                 {
                     if (damageInstigator != Entity.Null)
                     {
-                        var collisionMask = ~(1 << projectileData.teamId);
-                        SplashDamageRequest.Create(PostUpdateCommands, query.hitCollisionTestTick, damageInstigator, queryResult.hitPoint, collisionMask, projectileData.settings.splashDamage);
+                        SplashDamageRequest.Create(PostUpdateCommands, query.hitCollisionTestTick, damageInstigator, queryResult.hitPoint, splashCollisionMask, projectileData.settings.splashDamage);
                     }
                 }
 
@@ -139,6 +139,7 @@ public class HandleProjectileMovementCollisionQuery : BaseComponentSystem
             PostUpdateCommands.SetComponent(entityArray[i],projectileData);
         }
     }
+
 }
 
 

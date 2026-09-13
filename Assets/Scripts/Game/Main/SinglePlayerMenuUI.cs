@@ -308,7 +308,8 @@ public class SinglePlayerHudUI : MonoBehaviour
    Text m_ProgressText;
    Text m_BannerText;
     Text m_PlayTimeWarningText;
-   Text m_PlayerHealthText;
+    Text m_PlayerHealthText;
+    GameObject m_PlayerHealthBackground;
     void Awake()
     {
         var canvasObject = new GameObject("SinglePlayerHudCanvas", typeof(Canvas), typeof(CanvasScaler));
@@ -331,8 +332,9 @@ public class SinglePlayerHudUI : MonoBehaviour
        m_PlayTimeWarningText = CreateText(playTimeWarningBackground.transform, "", 24, TextAnchor.MiddleCenter, Vector2.zero, new Vector2(480f, 34f), new Color(1f, 0.92f, 0.6f), font);
        playTimeWarningBackground.gameObject.SetActive(false);
 
-       var healthBackground = CreatePanel(canvasObject.transform, new Vector2(0f, -300f), new Vector2(360f, 50f), new Color(0f, 0f, 0f, 0.55f));
-       m_PlayerHealthText = CreateText(healthBackground.transform, "", 24, TextAnchor.MiddleCenter, Vector2.zero, new Vector2(320f, 34f), Color.white, font);
+        m_PlayerHealthBackground = CreatePanel(canvasObject.transform, new Vector2(0f, -300f), new Vector2(360f, 50f), new Color(0f, 0f, 0f, 0.55f));
+        m_PlayerHealthBackground.gameObject.SetActive(false);
+        m_PlayerHealthText = CreateText(m_PlayerHealthBackground.transform, "", 24, TextAnchor.MiddleCenter, Vector2.zero, new Vector2(320f, 34f), Color.white, font);
     }
 
    public void UpdateStats(string status, string progress, string banner)
@@ -349,10 +351,11 @@ public class SinglePlayerHudUI : MonoBehaviour
        m_PlayTimeWarningText.transform.parent.gameObject.SetActive(!string.IsNullOrEmpty(message));
    }
 
-   public void UpdatePlayerHealth(float health, float maxHealth)
-   {
-       m_PlayerHealthText.text = $"HP: {Mathf.CeilToInt(health)} / {Mathf.CeilToInt(maxHealth)}";
-   }
+    public void UpdatePlayerHealth(float health, float maxHealth)
+    {
+        m_PlayerHealthBackground.gameObject.SetActive(true);
+        m_PlayerHealthText.text = $"HP: {Mathf.CeilToInt(health)} / {Mathf.CeilToInt(maxHealth)}";
+    }
 
     Font CreateFont()
     {
