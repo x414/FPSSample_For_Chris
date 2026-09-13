@@ -15,7 +15,7 @@ public static class RenderSettings
     public static ConfigVar rQuality;
     [ConfigVar(Name = "r.vsync", DefaultValue = "1", Description = "Number of v-blanks to wait for each frame. 0 means no sync", Flags = ConfigVar.Flags.Save)]
     public static ConfigVar rVSync;
-    [ConfigVar(Name = "r.fullscreen", DefaultValue = "3", Description = "Full screen mode (1: fullscreen window, 3: windowed; Windows maps unsupported modes to fullscreen window)", Flags = ConfigVar.Flags.Save)]
+    [ConfigVar(Name = "r.fullscreen", DefaultValue = "1", Description = "Full screen mode (1: fullscreen window, 3: windowed; Windows maps unsupported modes to fullscreen window)", Flags = ConfigVar.Flags.Save)]
     public static ConfigVar rFullscreen;
     [ConfigVar(Name = "r.aamode", DefaultValue = "taa", Description = "AA mode: off, fxaa, smaa, taa", Flags = ConfigVar.Flags.Save)]
     public static ConfigVar rAAMode;
@@ -43,7 +43,7 @@ public static class RenderSettings
     public static ConfigVar rDecalDist;
     [ConfigVar(Name = "r.gamma", DefaultValue = "1", Description = "User gamma correction", Flags = ConfigVar.Flags.Save)]
     public static ConfigVar rGamma;
-    [ConfigVar(Name = "r.resolution", DefaultValue = "1280x720", Description = "Screen resolution", Flags = ConfigVar.Flags.Save)]
+    [ConfigVar(Name = "r.resolution", DefaultValue = "", Description = "Screen resolution; empty uses the current display resolution", Flags = ConfigVar.Flags.Save)]
     public static ConfigVar rResolution;
     [ConfigVar(Name = "r.latesync", DefaultValue = "1", Description = "Sync with render thread late", Flags = ConfigVar.Flags.None)]
     public static ConfigVar rLateSync;
