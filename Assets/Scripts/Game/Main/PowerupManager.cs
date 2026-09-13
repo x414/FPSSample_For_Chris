@@ -18,6 +18,8 @@ public class ActivePowerup
 
 public class PowerupManager
 {
+    public event System.Action<PowerupType> PowerupActivated;
+
     List<ActivePowerup> m_ActivePowerups = new List<ActivePowerup>();
     float m_SpawnTimer;
     float m_SpawnInterval;
@@ -77,5 +79,6 @@ public class PowerupManager
             m_ActivePowerups.Add(new ActivePowerup { type = type, remainingTime = duration });
 
         GameDebug.Log($"Powerup activated: {type}");
+        PowerupActivated?.Invoke(type);
     }
 }

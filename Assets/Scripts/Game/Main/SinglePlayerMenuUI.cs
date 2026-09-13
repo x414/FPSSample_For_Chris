@@ -324,6 +324,8 @@ public class SinglePlayerHudUI : MonoBehaviour
     Text m_PlayTimeWarningText;
     Text m_PlayerHealthText;
     GameObject m_PlayerHealthBackground;
+    SinglePlayerVoiceAnnouncer m_VoiceAnnouncer;
+    string m_LastWaveAnnouncement;
     void Awake()
     {
         var canvasObject = new GameObject("SinglePlayerHudCanvas", typeof(Canvas), typeof(CanvasScaler));
@@ -349,6 +351,7 @@ public class SinglePlayerHudUI : MonoBehaviour
         m_PlayerHealthBackground = CreatePanel(canvasObject.transform, new Vector2(0f, -300f), new Vector2(360f, 50f), new Color(0f, 0f, 0f, 0.55f));
         m_PlayerHealthBackground.gameObject.SetActive(false);
         m_PlayerHealthText = CreateText(m_PlayerHealthBackground.transform, "", 24, TextAnchor.MiddleCenter, Vector2.zero, new Vector2(320f, 34f), Color.white, font);
+        m_VoiceAnnouncer = gameObject.AddComponent<SinglePlayerVoiceAnnouncer>();
     }
 
    public void UpdateStats(string status, string progress, string banner)
@@ -357,6 +360,39 @@ public class SinglePlayerHudUI : MonoBehaviour
         m_ProgressText.text = progress;
         m_BannerText.text = banner;
         m_BannerText.transform.parent.gameObject.SetActive(!string.IsNullOrEmpty(banner));
+    }
+
+    public void AnnounceWave(int wave, int robotCount, string banner)
+    {
+        if (string.IsNullOrEmpty(banner))
+            return;
+
+        if (banner == m_LastWaveAnnouncement)
+            return;
+
+        m_LastWaveAnnouncement = banner;
+        GameDebug.Log($"Voice announce request wave={wave} robots={robotCount} banner={banner}");
+        m_VoiceAnnouncer.AnnounceWave(wave, robotCount);
+    }
+
+    public void AnnounceCue(string cue)
+    {
+        m_VoiceAnnouncer.AnnounceCue(cue);
+    }
+
+    public void AnnounceGameOver(string reason)
+    {
+        m_VoiceAnnouncer.AnnounceGameOver(reason);
+    }
+
+    public void AnnouncePowerup(PowerupType type)
+    {
+        m_VoiceAnnouncer.AnnouncePowerup(type);
+    }
+
+    public void AnnounceTestSequence()
+    {
+        m_VoiceAnnouncer.AnnounceTestSequence();
     }
 
    public void UpdatePlayTimeWarning(string message)

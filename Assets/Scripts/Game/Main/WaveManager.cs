@@ -104,7 +104,7 @@ public class WaveManager
     {
        currentWave++;
        isWaveActive = true;
-       m_AnnouncementTimer = 3f;
+       m_AnnouncementTimer = 5f;
        int baseCount = m_Config.baseEnemiesPerWave + currentWave - 1;
        int baseA2Count = currentWave >= 3 ? Mathf.FloorToInt(currentWave / 2) : 0;
        int a2Count = Mathf.Min(baseCount - 1, Mathf.CeilToInt(baseA2Count * m_Config.enemyCountMultiplier));

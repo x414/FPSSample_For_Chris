@@ -93,6 +93,7 @@ public class SinglePlayerGameLoop : Game.IGameLoop
     bool m_GameplayStarted;
     bool m_AutoStart;
     bool m_DeveloperSelfTest;
+    bool m_VoiceSelfTest;
     bool m_PlayerDeathTracked;
     int m_LastBonusWave;
    int m_NextBotPlayerId = 100;
@@ -127,6 +128,8 @@ public class SinglePlayerGameLoop : Game.IGameLoop
                 m_AutoStart = true;
             else if (string.Equals(argument, "dev-selftest", StringComparison.OrdinalIgnoreCase))
                 m_DeveloperSelfTest = true;
+            else if (string.Equals(argument, "voice-selftest", StringComparison.OrdinalIgnoreCase))
+                m_VoiceSelfTest = true;
         }
 
         m_DiffConfig = DifficultyConfig.GetConfig(m_Difficulty.ToString());
@@ -323,7 +326,10 @@ public class SinglePlayerGameLoop : Game.IGameLoop
 
        m_PlayTimeWarningTimer = Mathf.Max(0f, m_PlayTimeWarningTimer - Time.unscaledDeltaTime);
         if (!m_DeveloperSelfTest && m_PlayTimeTracker.ConsumeTenMinuteWarning())
+        {
             m_PlayTimeWarningTimer = 5f;
+            m_HudUI.AnnounceCue("TenMinuteWarning");
+        }
 
        // Tick the game loop
        UpdateStateActiveTick();
@@ -349,10 +355,13 @@ public class SinglePlayerGameLoop : Game.IGameLoop
         {
            m_WaveManager.Tick(Time.deltaTime, playerPos, onShootPlayer, m_GameWorld);
            CheckWaveKills();
+           var waveAnnouncement = m_WaveManager.GetAnnouncementText();
             m_HudUI.UpdateStats(
                 "Lives: " + m_LivesRemaining + "    Score: " + m_ScoreManager.totalScore + "    Time: " + m_TimerManager.GetFormattedTime(),
                 m_WaveManager.GetProgressText(),
-                m_WaveManager.GetAnnouncementText());
+                waveAnnouncement);
+           if (!m_VoiceSelfTest)
+               m_HudUI.AnnounceWave(m_WaveManager.currentWave, m_WaveManager.waveTotalEnemies, waveAnnouncement);
         }
         else if ((m_Mode == Mode.Explore || m_Mode == Mode.TestExplore) && m_ExploreManager != null)
         {
@@ -460,21 +469,30 @@ public class SinglePlayerGameLoop : Game.IGameLoop
         if (m_SpawnCenter == Vector3.zero)
             m_SpawnCenter = GetPlayerPosition();
         m_PowerupManager = new PowerupManager(m_DiffConfig, m_SpawnCenter);
+        m_PowerupManager.PowerupActivated += type => m_HudUI.AnnouncePowerup(type);
 
         var baseMode = GetBaseMode(mode);
         if (mode == Mode.AIBattle)
+        {
             m_AIBattleManager = new AIBattleManager(m_DiffConfig, m_SpawnCenter, m_RobotSpawnForward, OnRobotKilled, CreateRobotEntity);
+            m_HudUI.AnnounceCue("AIBattleStart");
+        }
         else if (baseMode == Mode.Wave)
             m_WaveManager = new WaveManager(m_DiffConfig, m_SpawnCenter, m_RobotSpawnForward, OnRobotKilled, CreateRobotEntity);
         else
+        {
             m_ExploreManager = new ExploreManager(m_DiffConfig, m_SpawnCenter, m_RobotSpawnForward, OnRobotKilled, CreateRobotEntity,
                 CollectExplorePatrolAnchors());
+            m_HudUI.AnnounceCue("ExploreStart");
+        }
 
         if (m_MenuUI != null)
             UnityEngine.Object.Destroy(m_MenuUI.gameObject);
 
         Game.SetMousePointerLock(true);
         m_GameplayStarted = true;
+        if (m_DeveloperSelfTest && m_VoiceSelfTest)
+            m_HudUI.AnnounceTestSequence();
         if (m_DeveloperSelfTest)
         {
             GameDebug.Log($"Display state: mode={Screen.fullScreenMode}, window={Screen.width}x{Screen.height}, " +
@@ -648,6 +666,7 @@ public class SinglePlayerGameLoop : Game.IGameLoop
         {
             m_ScoreManager.AddWaveBonus();
             m_LastBonusWave = m_WaveManager.currentWave;
+            m_HudUI.AnnounceCue("WaveCleared");
         }
     }
 
@@ -676,6 +695,7 @@ public class SinglePlayerGameLoop : Game.IGameLoop
         if (m_GameOver) return;
 
         m_GameOver = true;
+        m_HudUI.AnnounceGameOver(reason);
         ShowResult(reason);
         GameDebug.Log($"GAME OVER! {reason}");
         GameDebug.Log($"Score: {m_ScoreManager.totalScore} | Kills: {m_ScoreManager.killCount} | Max Combo: x{m_ScoreManager.maxCombo}");
