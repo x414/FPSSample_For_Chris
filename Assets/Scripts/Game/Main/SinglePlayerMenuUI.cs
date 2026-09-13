@@ -20,6 +20,7 @@ public class SinglePlayerMenuUI : MonoBehaviour
     int m_TestModeIndex;
     int m_DifficultyIndex = 0;
     bool m_StartLocked;
+    bool m_DeveloperSelfTest;
 
     readonly string[] m_ModeNames = { "Wave", "Explore", "Test", "AI" };
     readonly string[] m_TestModeNames = { "Explore", "Wave" };
@@ -145,7 +146,12 @@ public class SinglePlayerMenuUI : MonoBehaviour
     {
         Game.SetMousePointerLock(false);
 
-        if (m_PlayTimeTracker != null)
+        if (m_DeveloperSelfTest)
+        {
+            m_PlayTimeText.text = "开发自测：不计入今日时长";
+            UpdateDailyLimitState();
+        }
+        else if (m_PlayTimeTracker != null)
         {
             var dailyLimitReached = m_PlayTimeTracker.IsLimitReached;
             m_PlayTimeText.text = dailyLimitReached
@@ -183,10 +189,11 @@ public class SinglePlayerMenuUI : MonoBehaviour
     }
 
     public void Initialize(Action<SinglePlayerGameLoop.Mode, SinglePlayerGameLoop.Difficulty> onStart,
-        DailyPlayTimeTracker playTimeTracker)
+        DailyPlayTimeTracker playTimeTracker, bool developerSelfTest = false)
     {
         m_OnStart = onStart;
         m_PlayTimeTracker = playTimeTracker;
+        m_DeveloperSelfTest = developerSelfTest;
         if (m_PlayTimeTracker != null)
         {
             UpdateDailyLimitState();
@@ -220,7 +227,7 @@ public class SinglePlayerMenuUI : MonoBehaviour
 
     void UpdateDailyLimitState()
     {
-        var dailyLimitReached = m_PlayTimeTracker != null && m_PlayTimeTracker.IsLimitReached;
+        var dailyLimitReached = !m_DeveloperSelfTest && m_PlayTimeTracker != null && m_PlayTimeTracker.IsLimitReached;
         m_StartLocked = dailyLimitReached && m_ModeIndex < 2;
         m_StartButton.interactable = !m_StartLocked;
         m_StartButton.image.color = m_StartLocked ? new Color(0.22f, 0.22f, 0.26f) : new Color(0.15f, 0.15f, 0.2f);
@@ -228,7 +235,8 @@ public class SinglePlayerMenuUI : MonoBehaviour
 
     void StartGame()
     {
-        if (m_StartLocked || (m_ModeIndex < 2 && m_PlayTimeTracker != null && m_PlayTimeTracker.IsLimitReached))
+        if (!m_DeveloperSelfTest && (m_StartLocked ||
+            (m_ModeIndex < 2 && m_PlayTimeTracker != null && m_PlayTimeTracker.IsLimitReached)))
             return;
 
         Console.SetOpen(false);

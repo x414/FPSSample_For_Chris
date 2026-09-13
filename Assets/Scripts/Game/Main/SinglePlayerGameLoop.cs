@@ -92,6 +92,7 @@ public class SinglePlayerGameLoop : Game.IGameLoop
    bool m_GameOver;
     bool m_GameplayStarted;
     bool m_AutoStart;
+    bool m_DeveloperSelfTest;
     bool m_PlayerDeathTracked;
     int m_LastBonusWave;
    int m_NextBotPlayerId = 100;
@@ -124,10 +125,14 @@ public class SinglePlayerGameLoop : Game.IGameLoop
                 m_Difficulty = Difficulty.Hard;
             else if (string.Equals(argument, "autostart", StringComparison.OrdinalIgnoreCase))
                 m_AutoStart = true;
+            else if (string.Equals(argument, "dev-selftest", StringComparison.OrdinalIgnoreCase))
+                m_DeveloperSelfTest = true;
         }
 
         m_DiffConfig = DifficultyConfig.GetConfig(m_Difficulty.ToString());
         m_PlayTimeTracker = new DailyPlayTimeTracker();
+        if (m_DeveloperSelfTest)
+            GameDebug.Log("Developer self-test active; daily play time recording disabled.");
         m_ScoreManager = new ScoreManager();
         m_TimerManager = new TimerManager(20f);
         m_GameOver = false;
@@ -160,7 +165,7 @@ public class SinglePlayerGameLoop : Game.IGameLoop
        suppressRealPlayerDamage = false;
        redirectedPlayerDamage = null;
        redirectedPlayerVisualHealth = null;
-       redirectedPlayerEntity = Entity.Null;
+        redirectedPlayerEntity = Entity.Null;
         if (m_PlayTimeTracker != null)
             m_PlayTimeTracker.Flush();
 
@@ -239,7 +244,7 @@ public class SinglePlayerGameLoop : Game.IGameLoop
 
        var menuObject = new GameObject("SinglePlayerMenu");
        m_MenuUI = menuObject.AddComponent<SinglePlayerMenuUI>();
-       m_MenuUI.Initialize(ConfirmSelection, m_PlayTimeTracker);
+       m_MenuUI.Initialize(ConfirmSelection, m_PlayTimeTracker, m_DeveloperSelfTest);
 
         var hudObject = new GameObject("SinglePlayerHud");
         m_HudUI = hudObject.AddComponent<SinglePlayerHudUI>();
@@ -317,7 +322,7 @@ public class SinglePlayerGameLoop : Game.IGameLoop
        UpdateRocketLauncher();
 
        m_PlayTimeWarningTimer = Mathf.Max(0f, m_PlayTimeWarningTimer - Time.unscaledDeltaTime);
-        if (m_PlayTimeTracker.ConsumeTenMinuteWarning())
+        if (!m_DeveloperSelfTest && m_PlayTimeTracker.ConsumeTenMinuteWarning())
             m_PlayTimeWarningTimer = 5f;
 
        // Tick the game loop
@@ -376,7 +381,7 @@ public class SinglePlayerGameLoop : Game.IGameLoop
             m_HudUI.UpdatePlayerHealth(m_PlayerHealth, m_DiffConfig.playerMaxHealth);
         }
 
-        m_HudUI.UpdatePlayTimeWarning(m_PlayTimeWarningTimer > 0f
+        m_HudUI.UpdatePlayTimeWarning(!m_DeveloperSelfTest && m_PlayTimeWarningTimer > 0f
             ? m_PlayTimeTracker.GetTenMinuteWarningMessage()
             : string.Empty);
 
@@ -386,8 +391,9 @@ public class SinglePlayerGameLoop : Game.IGameLoop
             OnGameOver("Time's up!");
         }
 
-        m_PlayTimeTracker.Record(Time.unscaledDeltaTime, Game.GetMousePointerLock());
-        bool isPlayTimeLimited = !IsTestMode() && m_Mode != Mode.AIBattle;
+        if (!m_DeveloperSelfTest)
+            m_PlayTimeTracker.Record(Time.unscaledDeltaTime, Game.GetMousePointerLock());
+        bool isPlayTimeLimited = !m_DeveloperSelfTest && !IsTestMode() && m_Mode != Mode.AIBattle;
         if (isPlayTimeLimited && m_PlayTimeTracker.IsLimitReached)
             OnGameOver(m_PlayTimeTracker.GetLimitMessage());
     }
@@ -423,7 +429,8 @@ public class SinglePlayerGameLoop : Game.IGameLoop
     {
         if (m_GameplayStarted) return;
         bool isQuickMode = IsTestMode(mode) || mode == Mode.AIBattle;
-        if (!isQuickMode && m_PlayTimeTracker != null && m_PlayTimeTracker.IsLimitReached) return;
+        if (!m_DeveloperSelfTest && !isQuickMode && m_PlayTimeTracker != null &&
+            m_PlayTimeTracker.IsLimitReached) return;
 
         m_Mode = mode;
         m_Difficulty = difficulty;
