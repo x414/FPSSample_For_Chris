@@ -45,6 +45,8 @@ public static class RenderSettings
     public static ConfigVar rGamma;
     [ConfigVar(Name = "r.resolution", DefaultValue = "", Description = "Screen resolution; empty uses the current display resolution", Flags = ConfigVar.Flags.Save)]
     public static ConfigVar rResolution;
+    [ConfigVar(Name = "config.displaysettingsversion", DefaultValue = "0", Description = "Version of migrated display settings", Flags = ConfigVar.Flags.Save)]
+    static ConfigVar displaySettingsVersion;
     [ConfigVar(Name = "r.latesync", DefaultValue = "1", Description = "Sync with render thread late", Flags = ConfigVar.Flags.None)]
     public static ConfigVar rLateSync;
     [ConfigVar(Name = "r.occlusionthreshold", DefaultValue = "50", Description = "Occlusion threshold", Flags = ConfigVar.Flags.None)]
@@ -56,9 +58,27 @@ public static class RenderSettings
         Console.AddCommand("r_quality", CmdQuality, "Set the render quality");
         Console.AddCommand("r_maxqueue", CmdMaxQueue, "Max queued frames");
         Console.AddCommand("r_srpbatching", CmdSrpBatching, "Use 0 or 1 to disable or enable SRP batching");
+        Console.AddCommand("r_migrate_display_settings", MigrateLegacyDisplaySettings,
+            "Migrate pre-fullscreen display defaults to native fullscreen");
 
         if (rResolution.Value == "")
             rResolution.Value = Screen.currentResolution.width + "x" + Screen.currentResolution.height + "@" + Screen.currentResolution.refreshRate;
+    }
+
+    static void MigrateLegacyDisplaySettings(string[] arguments)
+    {
+        if (displaySettingsVersion.IntValue >= 1)
+            return;
+
+        if (rFullscreen.Value == "3" && rResolution.Value == "1280x720")
+        {
+            rFullscreen.Value = "1";
+            rResolution.Value = Screen.currentResolution.width + "x" +
+                Screen.currentResolution.height + "@" + Screen.currentResolution.refreshRate;
+            GameDebug.Log("Migrated legacy windowed display settings to native fullscreen.");
+        }
+
+        displaySettingsVersion.Value = "1";
     }
 
     /*

@@ -356,6 +356,7 @@ public class Game : MonoBehaviour
             Console.EnqueueCommandNoHistory("server.sqp_port " + sqpPort);
 
         Console.EnqueueCommandNoHistory("exec -s " + k_UserConfigFilename);
+        Console.EnqueueCommandNoHistory("r_migrate_display_settings");
 
         // Default is to allow no frame cap, i.e. as fast as possible if vsync is disabled
         Application.targetFrameRate = -1;

@@ -476,6 +476,17 @@ public class SinglePlayerGameLoop : Game.IGameLoop
 
         Game.SetMousePointerLock(true);
         m_GameplayStarted = true;
+        if (m_DeveloperSelfTest)
+        {
+            GameDebug.Log($"Display state: mode={Screen.fullScreenMode}, window={Screen.width}x{Screen.height}, " +
+                $"desktop={Screen.currentResolution.width}x{Screen.currentResolution.height}@{Screen.currentResolution.refreshRate}");
+            var isFullscreenWindow = Screen.fullScreenMode == FullScreenMode.FullScreenWindow;
+            var isNativeResolution = Screen.width == Screen.currentResolution.width &&
+                Screen.height == Screen.currentResolution.height;
+            GameDebug.Log(isFullscreenWindow && isNativeResolution
+                ? "Display self-test passed: native fullscreen window."
+                : "Display self-test failed: window is not native fullscreen.");
+        }
         GameDebug.Log($"SinglePlayer active! Mode:{m_Mode} Difficulty:{m_Difficulty} Score:{m_ScoreManager.totalScore}");
     }
 
