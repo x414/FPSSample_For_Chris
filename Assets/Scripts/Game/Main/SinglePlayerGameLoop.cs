@@ -782,7 +782,8 @@ public class SinglePlayerGameLoop : Game.IGameLoop
         if (gameTime.tickRate != Game.serverTickRate.IntValue)
             gameTime.tickRate = Game.serverTickRate.IntValue;
 
-        if (Game.Input.GetKeyUp(KeyCode.H) && Game.allowCharChange.IntValue == 1)
+        if ((Game.Input.GetKeyUp(KeyCode.H) || Game.Input.GetKeyUp(KeyCode.Joystick1Button6)) &&
+            Game.allowCharChange.IntValue == 1)
             CmdNextHero(null);
 
         bool commandWasConsumed = false;
@@ -882,7 +883,7 @@ public class SinglePlayerGameLoop : Game.IGameLoop
         }
 
         if (!Game.GetMousePointerLock()) return;
-        if (!Game.Input.GetKeyDown(KeyCode.Q)) return;
+        if (!Game.Input.GetKeyDown(KeyCode.Q) && !Game.Input.GetKeyDown(KeyCode.Joystick1Button3)) return;
         if (Time.time - m_rocketLastFireTime < 2.0f) return;
 
         m_rocketLastFireTime = Time.time;

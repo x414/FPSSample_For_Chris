@@ -144,6 +144,12 @@ public class SinglePlayerMenuUI : MonoBehaviour
 
     void Update()
     {
+        if (Input.GetKeyUp(KeyCode.Escape))
+        {
+            gameObject.SetActive(false);
+            return;
+        }
+
         Game.SetMousePointerLock(false);
 
         if (m_DeveloperSelfTest)
