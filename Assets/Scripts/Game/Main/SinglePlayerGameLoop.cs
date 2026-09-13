@@ -442,8 +442,7 @@ public class SinglePlayerGameLoop : Game.IGameLoop
        m_PlayerHealth = m_DiffConfig.playerMaxHealth;
         m_PlayerDeathTracked = false;
         m_ScoreManager.Reset();
-        bool useShortTimer = IsTestMode(mode) || (mode == Mode.AIBattle && m_PlayTimeTracker != null && m_PlayTimeTracker.IsLimitReached);
-        m_TimerManager = new TimerManager(useShortTimer ? 1f : 20f);
+        m_TimerManager = new TimerManager(IsTestMode(mode) || mode == Mode.AIBattle ? 5f : 20f);
         m_StartupGraceTimer = StartupGracePeriod;
 
         m_SpawnCenter = Vector3.zero;
