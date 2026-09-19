@@ -139,7 +139,7 @@ public class HandleCharacterSpawnRequests : BaseComponentSystem
         var behaviorCtrlRepEntity = EntityManager.GetComponentData<ReplicatedEntityData>(charRepAll.abilityCollection);
         behaviorCtrlRepEntity.predictingPlayerId = owner.playerId;
         EntityManager.SetComponentData(charRepAll.abilityCollection, behaviorCtrlRepEntity);
-        
+
         return character;
     }
 

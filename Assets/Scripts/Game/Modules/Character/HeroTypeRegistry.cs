@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 #if UNITY_EDITOR
 using UnityEditor;
@@ -17,13 +18,17 @@ public class HeroTypeRegistry : RegistryBase
 
         entries.Clear();
         var guids = AssetDatabase.FindAssets("t:HeroTypeAsset");
+        var definitions = new List<HeroTypeAsset>();
         foreach (var guid in guids)
         {
             var path = AssetDatabase.GUIDToAssetPath(guid);
             var definition = AssetDatabase.LoadAssetAtPath<HeroTypeAsset>(path);
             Debug.Log("   Adding definition:" + definition);
-            entries.Add(definition);
+            definitions.Add(definition);
         }
+
+        entries.AddRange(definitions.OrderByDescending(entry => entry != null && (entry.name == "Hero_Terraformer" || entry.name == "Hero_Robot"))
+            .ThenBy(entry => entry == null ? string.Empty : entry.name));
         
         EditorUtility.SetDirty(this);
     }

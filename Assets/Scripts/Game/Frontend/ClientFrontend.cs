@@ -88,7 +88,7 @@ public class ClientFrontend : MonoBehaviour
         }
 
         // Toggle menu if not in editor
-        if(!Application.isEditor && Input.GetKeyUp(KeyCode.Escape))
+        if(!Application.isEditor && Input.GetKeyUp(KeyCode.Escape) && !AutomaticRifleUI.IsM700Scoped)
         {
             if (menuShowing == MenuShowing.None)
             {

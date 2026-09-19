@@ -40,6 +40,11 @@ public class Ability_AutoRifle : CharBehaviorFactory
 		public float maxCOF;
 		public float shotCOFIncrease;
 		public float COFDecreaseVel;
+
+		public UserCommand.Button aimButton;
+		public float aimFieldOfView;
+		public float aimCofMultiplier;
+		public float aimTransitionSpeed;
 	}
 
 	public struct InternalState : IComponentData
@@ -55,6 +60,8 @@ public class Ability_AutoRifle : CharBehaviorFactory
 
         public int ammoInClip;
 	    public float COF;
+	    public bool aiming;
+	    public bool lastAimButton;
 
 	    public void SetPhase(State action, int tick)
 	    {
@@ -73,6 +80,8 @@ public class Ability_AutoRifle : CharBehaviorFactory
             writer.WriteInt32("phaseStart", phaseStartTick);
             writer.WriteInt32("ammoInClip", ammoInClip);
 	        writer.WriteFloatQ("COF", COF,0);
+            writer.WriteBoolean("aiming", aiming);
+            writer.WriteBoolean("lastAimButton", lastAimButton);
         }
 
         public void Deserialize(ref SerializeContext context, ref NetworkReader reader)
@@ -81,6 +90,8 @@ public class Ability_AutoRifle : CharBehaviorFactory
             phaseStartTick = reader.ReadInt32();
             ammoInClip = reader.ReadInt32();
 	        COF = reader.ReadFloatQ();
+            aiming = reader.ReadBoolean();
+            lastAimButton = reader.ReadBoolean();
         }
         
 #if UNITY_EDITOR
@@ -144,6 +155,8 @@ public class Ability_AutoRifle : CharBehaviorFactory
 			action = State.Idle,
 			ammoInClip = settings.clipSize,
 			COF = settings.minCOF,
+			aiming = false,
+			lastAimButton = false,
 		};
 		entityManager.AddComponentData(entity, settings);
 		entityManager.AddComponentData(entity, internalState);
@@ -171,6 +184,28 @@ public class Ability_AutoRifle : CharBehaviorFactory
 		}
 
 		return command.buttons.IsSet(settings.fireButton) ? State.Fire : State.Idle;
+	}
+
+	public static bool IsAiming(ref UserCommand command, ref Settings settings)
+	{
+		return settings.aimButton != UserCommand.Button.None && settings.aimFieldOfView > 0f &&
+			command.buttons.IsSet(settings.aimButton);
+	}
+
+	public static bool IsAiming(EntityManager entityManager, Entity character)
+	{
+		if (!entityManager.Exists(character) || !entityManager.HasComponent<CharacterReplicatedData>(character))
+			return false;
+
+		var characterReplicatedData = entityManager.GetComponentData<CharacterReplicatedData>(character);
+		var abilityEntity = characterReplicatedData.FindAbilityWithComponent(entityManager, typeof(PredictedState));
+		if (abilityEntity == Entity.Null || !entityManager.HasComponent<Settings>(abilityEntity) ||
+			!entityManager.HasComponent<PredictedState>(abilityEntity))
+			return false;
+
+		var settings = entityManager.GetComponentData<Settings>(abilityEntity);
+		var predictedState = entityManager.GetComponentData<PredictedState>(abilityEntity);
+		return settings.aimButton != UserCommand.Button.None && settings.aimFieldOfView > 0f && predictedState.aiming;
 	}
 }
 
@@ -222,12 +257,31 @@ class AutoRifle_Update : BaseComponentDataSystem<CharBehaviour,AbilityControl,Ab
 		}
 		EntityManager.SetComponentData(abilityEntity, predictedState);
 
+		if (!CharacterBehaviours.IsValidCharacter(EntityManager, charAbility.character))
+			return;
+
+		var command = EntityManager.GetComponentData<UserCommandComponentData>(charAbility.character).command;
+		var healthState = EntityManager.GetComponentData<HealthStateData>(charAbility.character);
+		var supportsScope = settings.aimButton != UserCommand.Button.None && settings.aimFieldOfView > 0f;
+		if (!supportsScope || healthState.health <= 0)
+		{
+			predictedState.aiming = false;
+			predictedState.lastAimButton = false;
+		}
+		else
+		{
+			var aimButtonPressed = command.buttons.IsSet(settings.aimButton);
+			if (aimButtonPressed && !predictedState.lastAimButton)
+				predictedState.aiming = !predictedState.aiming;
+			predictedState.lastAimButton = aimButtonPressed;
+		}
+
+		EntityManager.SetComponentData(abilityEntity, predictedState);
+
 		if (abilityCtrl.active == 0)
 		{
 			return;
 		}
-		
-		var command = EntityManager.GetComponentData<UserCommandComponentData>(charAbility.character).command;
 		
 		switch (predictedState.action)
 		{
@@ -339,7 +393,9 @@ class AutoRifle_Update : BaseComponentDataSystem<CharBehaviour,AbilityControl,Ab
 
 			var cross = math.cross(new float3(0, 1, 0),aimDir);
 			var isAIBattleRobot = SinglePlayerGameLoop.suppressRealPlayerDamage && character.teamId == 1;
-			var cofAngle = isAIBattleRobot ? 0f : math.radians(predictedState.COF)*0.5f;
+			var aiming = settings.aimButton != UserCommand.Button.None && settings.aimFieldOfView > 0f && predictedState.aiming;
+			var cof = predictedState.COF * (aiming ? settings.aimCofMultiplier : 1f);
+			var cofAngle = isAIBattleRobot ? 0f : math.radians(cof)*0.5f;
 			var direction = math.mul(quaternion.AxisAngle(cross, cofAngle), aimDir);
 
 			// TODO use tick as random seed so server and client calculates same angle for given tick  

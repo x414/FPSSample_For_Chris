@@ -29,10 +29,6 @@ public class AnimStateController : MonoBehaviour
         m_PlayableGraph = PlayableGraph.Create(name);
         Profiler.EndSample();
     
-#if UNITY_EDITOR        
-        GraphVisualizerClient.Show(m_PlayableGraph);
-#endif
-        
         Profiler.BeginSample("Instantiate playables");
         m_animGraph = animStateDefinition.Instatiate(entityManager, owner, m_PlayableGraph, character);
         Profiler.EndSample();

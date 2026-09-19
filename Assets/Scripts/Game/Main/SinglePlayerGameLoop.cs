@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 using Unity.Entities;
 using Unity.Mathematics;
@@ -102,6 +103,7 @@ public class SinglePlayerGameLoop : Game.IGameLoop
     float m_ShieldMultiplier = 1f;
     float m_PlayTimeWarningTimer;
     float m_StartupGraceTimer;
+    string m_PendingGunName;
     const float StartupGracePeriod = 5f;
 
     public bool Init(string[] args)
@@ -143,6 +145,7 @@ public class SinglePlayerGameLoop : Game.IGameLoop
 
         // Register console commands
         Console.AddCommand("nextchar", CmdNextHero, "Select next character", GetHashCode());
+        Console.AddCommand("gun", CmdSelectHero, "Select a gun hero by name (M4A1, MP5, AK47, M700)", GetHashCode());
         Console.AddCommand("spectator", CmdSpectatorCam, "Select spectator cam", GetHashCode());
         Console.AddCommand("respawn", CmdRespawn, "Force a respawn", GetHashCode());
         Console.AddCommand("score", CmdShowScore, "Show current score", GetHashCode());
@@ -552,6 +555,7 @@ public class SinglePlayerGameLoop : Game.IGameLoop
                 if (seen.Add(position))
                     anchors.Add(position);
             }
+
         }
 
         GameDebug.Log($"Explore patrol anchors: {anchors.Count}");
@@ -809,6 +813,13 @@ public class SinglePlayerGameLoop : Game.IGameLoop
         bool userInputEnabled = Game.GetMousePointerLock();
         m_PlayerModuleClient.SampleInput(userInputEnabled, Time.deltaTime, 0);
 
+        if (!string.IsNullOrEmpty(m_PendingGunName) && m_Player != null)
+        {
+            var requestedGun = m_PendingGunName;
+            m_PendingGunName = null;
+            CmdSelectHero(new[] { requestedGun });
+        }
+
         if (gameTime.tickRate != Game.serverTickRate.IntValue)
             gameTime.tickRate = Game.serverTickRate.IntValue;
 
@@ -838,6 +849,34 @@ public class SinglePlayerGameLoop : Game.IGameLoop
         charControl.requestedCharacterType = charControl.characterType + 1;
         if (charControl.requestedCharacterType >= charSetupRegistry.entries.Count)
             charControl.requestedCharacterType = 0;
+    }
+
+    void CmdSelectHero(string[] args)
+    {
+        if (args.Length == 0) return;
+        if (m_Player == null)
+        {
+            m_PendingGunName = args[0];
+            GameDebug.Log("Gun selection queued: " + args[0]);
+            return;
+        }
+        if (Game.allowCharChange.IntValue != 1) return;
+        var charSetupRegistry = m_resourceSystem.GetResourceRegistry<HeroTypeRegistry>();
+        var requestedHeroName = args[0];
+        var selectedHero = charSetupRegistry.entries.Find(entry =>
+            entry != null && (entry.name.Equals(requestedHeroName, StringComparison.OrdinalIgnoreCase) ||
+                               entry.name.Equals("Hero_" + requestedHeroName, StringComparison.OrdinalIgnoreCase)));
+        if (selectedHero == null)
+        {
+            GameDebug.LogError("Unknown gun hero: " + args[0]);
+            GameDebug.LogError("Available heroes: " + string.Join(", ", charSetupRegistry.entries.Select(entry => entry == null ? "<null>" : entry.name)));
+            return;
+        }
+
+        var playerEntity = m_Player.gameObject.GetComponent<GameObjectEntity>().Entity;
+        var charControl = m_GameWorld.GetEntityManager().GetComponentObject<PlayerCharacterControl>(playerEntity);
+        charControl.requestedCharacterType = charSetupRegistry.entries.IndexOf(selectedHero);
+        GameDebug.Log("Gun self-test selected: " + selectedHero.name);
     }
 
     void CmdSpectatorCam(string[] args)

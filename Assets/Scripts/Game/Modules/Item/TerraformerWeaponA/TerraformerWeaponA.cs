@@ -108,17 +108,19 @@ public class UpdateTerraformerWeaponA : BaseComponentSystem<CharacterPresentatio
             }
         }
    
-        // Update using ProjectileLauncher ability state
+        // Update using ProjectileLauncher ability state. New AutoRifle-only weapons can omit this ability.
         var rocketAbility = charRepAll.FindAbilityWithComponent(EntityManager,typeof(Ability_ProjectileLauncher.InterpolatedState));
-        GameDebug.Assert(rocketAbility != Entity.Null,"AbilityController does not own a Ability_ProjectileLauncher ability");
-        var rocketLaunchInterpolatedState = EntityManager.GetComponentData<Ability_ProjectileLauncher.InterpolatedState>(rocketAbility);
-        if (weapon.secondaryFireEvent.Update(time, rocketLaunchInterpolatedState.fireTick))
+        if (rocketAbility != Entity.Null)
         {
-            if(weapon.secondaryFireSound != null)
-                Game.SoundSystem.Play(weapon.secondaryFireSound, weapon.muzzle);
-                
-            if(weapon.secondaryMuzzleFlash != null)
-                weapon.secondaryMuzzleFlash.Play();
+            var rocketLaunchInterpolatedState = EntityManager.GetComponentData<Ability_ProjectileLauncher.InterpolatedState>(rocketAbility);
+            if (weapon.secondaryFireEvent.Update(time, rocketLaunchInterpolatedState.fireTick))
+            {
+                if(weapon.secondaryFireSound != null)
+                    Game.SoundSystem.Play(weapon.secondaryFireSound, weapon.muzzle);
+
+                if(weapon.secondaryMuzzleFlash != null)
+                    weapon.secondaryMuzzleFlash.Play();
+            }
         }
 
         // Update using Melee ability ability state
