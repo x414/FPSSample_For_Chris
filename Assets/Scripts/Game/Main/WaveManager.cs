@@ -3,6 +3,9 @@ using UnityEngine;
 
 public class WaveManager
 {
+    const float DespawnDelay = 5.5f;
+    const float FadeOutDuration = 1.5f;
+
     public int currentWave { get; private set; }
     public bool isWaveActive { get; private set; }
     public int waveTotalEnemies { get; private set; }
@@ -21,7 +24,14 @@ public class WaveManager
 
     List<AIController> m_AliveRobots = new List<AIController>();
     List<RobotSpawnRequest> m_PendingRobots = new List<RobotSpawnRequest>();
-    List<AIController> m_DeadRobots = new List<AIController>();
+    struct DeadRobotCleanup
+    {
+        public AIController robot;
+        public float timeUntilCleanup;
+        public bool fadeOutStarted;
+    }
+
+    List<DeadRobotCleanup> m_DeadRobots = new List<DeadRobotCleanup>();
     DifficultyConfig m_Config;
     Vector3 m_SpawnCenter;
     Vector3 m_SpawnForward;
@@ -58,9 +68,33 @@ public class WaveManager
                {
                    m_OnRobotKilled?.Invoke(robot);
                     waveKilledEnemies++;
-                   m_DeadRobots.Add(robot);
+                   m_DeadRobots.Add(new DeadRobotCleanup
+                   {
+                       robot = robot,
+                       timeUntilCleanup = DespawnDelay
+                   });
                     m_AliveRobots.RemoveAt(i);
                 }
+            }
+
+            for (int i = m_DeadRobots.Count - 1; i >= 0; i--)
+            {
+                var cleanup = m_DeadRobots[i];
+                cleanup.timeUntilCleanup -= deltaTime;
+
+                if (!cleanup.fadeOutStarted && cleanup.timeUntilCleanup <= FadeOutDuration)
+                {
+                    cleanup.fadeOutStarted = true;
+                    cleanup.robot.BeginFadeOut(FadeOutDuration);
+                }
+
+                m_DeadRobots[i] = cleanup;
+
+                if (cleanup.timeUntilCleanup > 0f)
+                    continue;
+
+                cleanup.robot.Despawn(world);
+                m_DeadRobots.RemoveAt(i);
             }
 
             if (m_SpawnCooldown > 0f)

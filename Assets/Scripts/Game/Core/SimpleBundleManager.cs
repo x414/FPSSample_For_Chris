@@ -44,11 +44,17 @@ public class SimpleBundleManager
 
     public static void ReleaseLevelAssetBundle(string name)
     {
-        // TODO (petera) : Implement unloading of asset bundles. Ideally not by name.
+        var cacheKey = name?.ToLowerInvariant();
+        if (cacheKey != null && m_levelBundles.TryGetValue(cacheKey, out var bundle))
+        {
+            m_levelBundles.Remove(cacheKey);
+            bundle.Unload(true);
+            GameDebug.Log("Released level asset bundle:" + name);
+
+        }
     }
 
     static Dictionary<string, AssetBundle> m_levelBundles = new Dictionary<string, AssetBundle>();
-
     [ConfigVar(Name = "res.runtimebundlepath", DefaultValue = "AssetBundles", Description = "Asset bundle folder", Flags = ConfigVar.Flags.ServerInfo)]
     public static ConfigVar m_runtimeBundlePath;
 

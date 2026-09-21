@@ -32,6 +32,8 @@ public class LevelManager
     };
 
     public Level currentLevel { get; private set; }
+    string m_PendingReleaseLevelName;
+    string m_PendingReleaseScenePath;
 
     public void Init()
     {
@@ -59,6 +61,13 @@ public class LevelManager
     {
         if (currentLevel != null)
             UnloadLevel();
+
+        if (string.Equals(m_PendingReleaseLevelName, name, StringComparison.OrdinalIgnoreCase))
+        {
+            SceneManager.sceneUnloaded -= OnLevelSceneUnloaded;
+            m_PendingReleaseLevelName = null;
+            m_PendingReleaseScenePath = null;
+        }
 
         // This is a pretty ugly hack to handle problems with loading camera and post processing volumes
         // and those not being initalized at the same time. We simply disable the old camera and the 
@@ -141,11 +150,15 @@ public class LevelManager
         if (currentLevel.state == LevelState.Loading)
             throw new NotImplementedException("TODO : Implement unload during load");
 
+        var oldScenePath = SceneManager.GetActiveScene().path;
+        var oldLevelName = currentLevel.name;
         // TODO : Load empty scene for now
         SceneManager.LoadScene(1);
 
-        SimpleBundleManager.ReleaseLevelAssetBundle(currentLevel.name);
         currentLevel = null;
+        m_PendingReleaseLevelName = oldLevelName;
+        m_PendingReleaseScenePath = oldScenePath;
+        SceneManager.sceneUnloaded += OnLevelSceneUnloaded;
     }
 
     public void Update()
@@ -172,6 +185,26 @@ public class LevelManager
                 
                 GameDebug.Log("Scene " + currentLevel.name + " loaded");
             }
+        }
+    }
+
+    void OnLevelSceneUnloaded(Scene unloadedScene)
+    {
+        if (string.IsNullOrEmpty(m_PendingReleaseLevelName) ||
+            unloadedScene.path != m_PendingReleaseScenePath)
+        {
+            return;
+        }
+
+        var pendingLevelName = m_PendingReleaseLevelName;
+        m_PendingReleaseLevelName = null;
+        m_PendingReleaseScenePath = null;
+        SceneManager.sceneUnloaded -= OnLevelSceneUnloaded;
+
+        if (!string.IsNullOrEmpty(pendingLevelName))
+        {
+            SimpleBundleManager.ReleaseLevelAssetBundle(pendingLevelName);
+            Resources.UnloadUnusedAssets();
         }
     }
 

@@ -82,6 +82,51 @@ public class AIController
     public float DesiredMoveYaw { get; private set; }
     public bool WantsFire { get; private set; }
 
+    public void Despawn(GameWorld world)
+    {
+        var playerState = m_PlayerState;
+        var characterObject = m_CharacterObject;
+        var entityManager = world.GetEntityManager();
+
+        if (characterObject == null && playerState != null &&
+            playerState.controlledEntity != Entity.Null &&
+            entityManager.Exists(playerState.controlledEntity) &&
+            entityManager.HasComponent<Character>(playerState.controlledEntity))
+        {
+            characterObject = entityManager
+                .GetComponentObject<Character>(playerState.controlledEntity)
+                .gameObject;
+        }
+
+        m_PlayerState = null;
+        m_CharacterObject = null;
+
+        if (characterObject != null && characterObject != playerState?.gameObject)
+        {
+            GameDebug.Log($"Despawn robot character:{characterObject.name}");
+            world.RequestDespawn(characterObject);
+        }
+
+        if (playerState != null && playerState.gameObject != null)
+        {
+            GameDebug.Log($"Despawn robot player:{playerState.gameObject.name}");
+            world.RequestDespawn(playerState.gameObject);
+        }
+    }
+
+    public void BeginFadeOut(float duration)
+    {
+        if (m_CharacterObject == null)
+            return;
+
+        var fadeOut = m_CharacterObject.GetComponent<RobotFadeOut>();
+        if (fadeOut == null)
+            fadeOut = m_CharacterObject.AddComponent<RobotFadeOut>();
+
+        var character = m_CharacterObject.GetComponent<Character>();
+        fadeOut.Begin(duration, character != null ? character.presentations : null);
+    }
+
     const float attackRange = 20f;
     const float chaseRange = 30f;
     const float loseTargetRange = 40f;
