@@ -166,6 +166,11 @@ class CharacterModuleClient : CharacterModuleShared
         characterCameraSystem.Update();
         m_UpdatePresentationAttachmentTransform.Update();
     }
+
+    public void ToggleThirdPerson()
+    {
+        characterCameraSystem.ToggleFOrceThirdPerson();
+    }
     
     void CmdToggleThirdperson(string[] args)
     {

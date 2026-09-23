@@ -7,6 +7,7 @@ using UnityEngine.UI;
 public class AutomaticRifleUI : AbilityUI
 {
     public static bool IsM700Scoped;
+    public static bool selfTestScopeForced;
 
     public override void UpdateAbilityUI(EntityManager entityManager, ref GameTime time)
     {
@@ -17,7 +18,9 @@ public class AutomaticRifleUI : AbilityUI
         var state = entityManager.GetComponentData<Ability_AutoRifle.PredictedState>(ability);
 		var settings = entityManager.GetComponentData<Ability_AutoRifle.Settings>(ability);
 		var isAiming = Ability_AutoRifle.IsAiming(entityManager, abilityOwner);
-		IsM700Scoped = isAiming;
+		IsM700Scoped = isAiming || selfTestScopeForced;
+		if (selfTestScopeForced)
+			Debug.Log($"M700 self-test scope UI: isAiming={isAiming} forced={selfTestScopeForced} overlay={(m_ScopeOverlayRoot == null ? "null" : m_ScopeOverlayRoot.activeSelf.ToString())}");
 		if (IsM700Scoped && Input.GetKeyUp(KeyCode.Escape))
 		{
 			state.aiming = false;
@@ -26,15 +29,15 @@ public class AutomaticRifleUI : AbilityUI
 			isAiming = false;
 		}
 
-        if (isAiming && m_ScopeOverlayRoot == null)
+        if ((isAiming || selfTestScopeForced) && m_ScopeOverlayRoot == null)
             CreateScopeOverlay();
-        if (m_ScopeOverlayRoot != null && m_ScopeOverlayRoot.activeSelf != isAiming)
-            m_ScopeOverlayRoot.SetActive(isAiming);
-        if (m_ScopeCamera != null && m_ScopeCamera.enabled != isAiming)
-            m_ScopeCamera.enabled = isAiming;
+        if (m_ScopeOverlayRoot != null && m_ScopeOverlayRoot.activeSelf != (isAiming || selfTestScopeForced))
+            m_ScopeOverlayRoot.SetActive(isAiming || selfTestScopeForced);
+        if (m_ScopeCamera != null && m_ScopeCamera.enabled != (isAiming || selfTestScopeForced))
+            m_ScopeCamera.enabled = isAiming || selfTestScopeForced;
 
         var character = entityManager.GetComponentObject<Character>(abilityOwner);
-        if (isAiming)
+        if (isAiming || selfTestScopeForced)
             UpdateScopeCamera(character.heroTypeData.aimFieldOfView);
 
         var selectedIcon = character.heroTypeData.hudIcon;

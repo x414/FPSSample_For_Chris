@@ -25,8 +25,14 @@ public class HUDCrosshair : MonoBehaviour
     public RawImage deathMarker;
     public RawImage damageIndicator;
 
+    Canvas m_canvas;
+    Vector2 m_defaultAnchoredPosition;
+
     void Awake()
     {
+        var rectTransform = (RectTransform)transform;
+        m_canvas = GetComponentInParent<Canvas>();
+        m_defaultAnchoredPosition = rectTransform.anchoredPosition;
         hitMaker.gameObject.SetActive(false);
         deathMarker.gameObject.SetActive(false);
         damageIndicator.gameObject.SetActive(false);
@@ -77,6 +83,34 @@ public class HUDCrosshair : MonoBehaviour
             m_hideDeathIndicatorTime = Time.time + deathIndicatorShowDuration;
             deathMarker.gameObject.SetActive(true);
         }
+    }
+
+    public void SetThirdPersonAim(Camera camera, Vector3 aimPoint)
+    {
+        var viewportPoint = camera.WorldToViewportPoint(aimPoint);
+        if (viewportPoint.z <= 0f)
+        {
+            ResetThirdPersonAim();
+            return;
+        }
+
+        var parentRectTransform = transform.parent as RectTransform;
+        var screenPoint = new Vector2(
+            viewportPoint.x * Screen.width,
+            viewportPoint.y * Screen.height);
+        var uiCamera = m_canvas != null && m_canvas.renderMode == RenderMode.ScreenSpaceOverlay
+            ? null
+            : camera;
+        if (RectTransformUtility.ScreenPointToLocalPointInRectangle(
+            parentRectTransform, screenPoint, uiCamera, out var localPoint))
+        {
+            ((RectTransform)transform).anchoredPosition = localPoint;
+        }
+    }
+
+    public void ResetThirdPersonAim()
+    {
+        ((RectTransform)transform).anchoredPosition = m_defaultAnchoredPosition;
     }
 
     public void UpdateHitDirectionIndicator(Quaternion cameraRotation)

@@ -157,6 +157,11 @@ public class SinglePlayerMenuUI : MonoBehaviour
             m_PlayTimeText.text = "开发自测：不计入今日时长";
             UpdateDailyLimitState();
         }
+        else if (m_ModeIndex >= 2)
+        {
+            m_PlayTimeText.text = "当前模式不计入今日时长";
+            UpdateDailyLimitState();
+        }
         else if (m_PlayTimeTracker != null)
         {
             var dailyLimitReached = m_PlayTimeTracker.IsLimitReached;

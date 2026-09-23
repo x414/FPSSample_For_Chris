@@ -13,6 +13,7 @@ public class CharacterPresentationSetup : MonoBehaviour
     public Vector3 weaponOffsetDebug;
 
     [NonSerialized] public Entity character;
+    [NonSerialized] public bool isFirstPerson;
 
     [NonSerialized] public bool updateTransform = true;
     [NonSerialized] public Entity attachToPresentation;

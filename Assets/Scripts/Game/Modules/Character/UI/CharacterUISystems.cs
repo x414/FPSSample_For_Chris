@@ -115,6 +115,35 @@ public class UpdateCharacterUI : BaseComponentSystem
             if (characterControl.lastRegisteredControlledEntity == Entity.Null)
                 continue;
 
+            if (characterControl.isThirdPerson)
+            {
+                var activeCamera = Camera.main;
+                if (activeCamera != null)
+                {
+                    var aimCharacter =
+                        EntityManager.GetComponentObject<Character>(characterControl.lastRegisteredControlledEntity);
+                    var charPredictedState = EntityManager.GetComponentData<CharacterPredictedData>(
+                        characterControl.lastRegisteredControlledEntity);
+                    var userCommand = EntityManager.GetComponentData<UserCommandComponentData>(
+                        characterControl.lastRegisteredControlledEntity).command;
+
+                    var eyePos = charPredictedState.position + Vector3.up * aimCharacter.eyeHeight;
+                    var aimDirection = userCommand.lookDir;
+                    var aimPoint = eyePos + aimDirection * 500f;
+                    if (Physics.Raycast(eyePos + aimDirection * 0.5f, aimDirection, out var aimHit,
+                        500f, ~0, QueryTriggerInteraction.Ignore))
+                    {
+                        aimPoint = aimHit.point;
+                    }
+
+                    characterControl.hud.SetThirdPersonAim(activeCamera, aimPoint);
+                }
+            }
+            else
+            {
+                characterControl.hud.ResetThirdPersonAim();
+            }
+
             // Check for damage inflicted and recieved
             var damageHistory = EntityManager.GetComponentData<DamageHistoryData>(characterControl.lastRegisteredControlledEntity);
             if (damageHistory.inflictedDamage.tick > characterControl.lastDamageInflictedTick)

@@ -58,6 +58,7 @@ public class HandleCharacterSpawn : InitializeComponentGroupSystem<Character, Ha
 
             var charPresentation = EntityManager.GetComponentObject<CharacterPresentationSetup>(charPresentationEntity);
             charPresentation.character = charEntity;
+            charPresentation.isFirstPerson = false;
             character.presentations.Add(charPresentation);
             
             // Setup health
@@ -118,6 +119,7 @@ public class HandleCharacterSpawn : InitializeComponentGroupSystem<Character, Ha
                 var itemCharPresentation = EntityManager.GetComponentObject<CharacterPresentationSetup>(itemGOE.Entity);
                 itemCharPresentation.character = charEntity;
                 itemCharPresentation.attachToPresentation = charPresentationEntity; 
+                itemCharPresentation.isFirstPerson = false;
                 character.presentations.Add(itemCharPresentation);
             }
         }

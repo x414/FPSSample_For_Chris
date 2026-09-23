@@ -108,6 +108,11 @@ public class CharacterModulePreview : CharacterModuleShared
         m_UpdatePresentationAttachmentTransform.Update();
     }
 
+    public void ToggleThirdPerson()
+    {
+        m_characterCameraSystem.ToggleFOrceThirdPerson();
+    }
+
    
     public void UpdateUI()
     {

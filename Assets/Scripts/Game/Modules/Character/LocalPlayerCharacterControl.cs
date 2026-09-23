@@ -18,6 +18,7 @@ public class LocalPlayerCharacterControl : MonoBehaviour
 
     public int lastDamageInflictedTick;
     public int lastDamageReceivedTick;
+    public bool isThirdPerson;
 
     public List<AbilityUI> registeredCharUIs = new List<AbilityUI>();
 
@@ -108,6 +109,7 @@ public class UpdateCharacter1PSpawn : BaseComponentSystem
                     var char1PPresentation = EntityManager.GetComponentObject<CharacterPresentationSetup>(char1PEntity);
                     char1PPresentation.character = charClientEntity;
                     char1PPresentation.updateTransform = false;
+                    char1PPresentation.isFirstPerson = true;
                     charCtrl.firstPerson.presentations.Add(char1PPresentation);
                     
                     // Create 1P items
@@ -123,6 +125,7 @@ public class UpdateCharacter1PSpawn : BaseComponentSystem
                             var itemPresentation = EntityManager.GetComponentObject<CharacterPresentationSetup>(itemEntity);
                             itemPresentation.character = charClientEntity;
                             itemPresentation.attachToPresentation = char1PEntity;
+                            itemPresentation.isFirstPerson = true;
                             charCtrl.firstPerson.presentations.Add(itemPresentation);
                         }
                     }
@@ -140,14 +143,37 @@ public class UpdateCharacter1PSpawn : BaseComponentSystem
 [DisableAutoCreation]
 public class UpdateCharacterCamera : BaseComponentSystem<LocalPlayer,LocalPlayerCharacterControl,PlayerCameraSettings>
 {
-    private const float k_default3PDisst = 2.5f;
+    private const float k_default3PDisst = 4.5f;
+    private const float k_thirdPersonAimDistance = 500f;
+    public static float selfTestCameraYaw = float.MinValue;
+    static readonly HashSet<string> firstPersonOnlyHeroes = new HashSet<string>
+    {
+        "Hero_M4A1", "Hero_MP5", "Hero_AK47", "Hero_M700"
+    };
     private float camDist3P = k_default3PDisst; 
     
     public UpdateCharacterCamera(GameWorld world) : base(world) {}
 
+    public static bool IsFirstPersonOnlyHero(string heroName)
+    {
+        return !string.IsNullOrEmpty(heroName) && firstPersonOnlyHeroes.Contains(heroName);
+    }
+
     public void ToggleFOrceThirdPerson()   
     {
+        var heroName = GetCurrentHeroName();
+        if (IsFirstPersonOnlyHero(heroName))
+        {
+            forceThirdPerson = false;
+            GameDebug.Log("Third person unavailable for: " + heroName);
+            Debug.Log("Third person unavailable for: " + heroName);
+            return;
+        }
+
         forceThirdPerson = !forceThirdPerson;
+        var viewName = forceThirdPerson ? "ThirdPerson" : "FirstPerson";
+        GameDebug.Log("Camera view switched: " + viewName);
+        Debug.Log("Camera view switched: " + viewName);
     }
 
     protected override void Update(Entity entity, LocalPlayer localPlayer, LocalPlayerCharacterControl characterControl, PlayerCameraSettings cameraSettings)
@@ -183,8 +209,22 @@ public class UpdateCharacterCamera : BaseComponentSystem<LocalPlayer,LocalPlayer
         }            
 
         // Update character visibility
-        var camProfile = forceThirdPerson ? CameraProfile.ThirdPerson : charPredictedState.cameraProfile; 
+        if (character.heroTypeData != null && IsFirstPersonOnlyHero(character.heroTypeData.name))
+            forceThirdPerson = false;
+
+        var camProfile = forceThirdPerson ? CameraProfile.ThirdPerson : charPredictedState.cameraProfile;
+        var isM700Scoped = character.heroTypeData != null && character.heroTypeData.name == "Hero_M700" &&
+            (AutomaticRifleUI.IsM700Scoped || AutomaticRifleUI.selfTestScopeForced ||
+             Ability_AutoRifle.IsAiming(EntityManager, localPlayer.controlledEntity));
+        if (isM700Scoped)
+        {
+            camProfile = CameraProfile.FirstPerson;
+            forceThirdPerson = false;
+        }
         var thirdPerson = camProfile != CameraProfile.FirstPerson;
+        characterControl.isThirdPerson = thirdPerson;
+        if (Time.frameCount % 30 == 0)
+            Debug.Log($"Camera state debug: frame={Time.frameCount} force={forceThirdPerson} profile={camProfile} third={thirdPerson}");
         foreach (var charPress in character.presentations)
         {
             charPress.SetVisible(thirdPerson);
@@ -197,6 +237,8 @@ public class UpdateCharacterCamera : BaseComponentSystem<LocalPlayer,LocalPlayer
         // Update camera settings
         var userCommand = EntityManager.GetComponentData<UserCommandComponentData>(localPlayer.controlledEntity);
         var lookRotation = userCommand.command.lookRotation;
+        if (selfTestCameraYaw >= 0f)
+            lookRotation = Quaternion.Euler(0f, selfTestCameraYaw, 0f);
         
         cameraSettings.isEnabled = true;
 
@@ -250,16 +292,36 @@ public class UpdateCharacterCamera : BaseComponentSystem<LocalPlayer,LocalPlayer
                 
                 
                 var eyePos = charPredictedState.position + Vector3.up*character.eyeHeight;
-                cameraSettings.position = eyePos; 
                 cameraSettings.rotation = lookRotation;
 
                 // Simpe offset of camera for better 3rd person view. This is only for animation debug atm
                 var viewDir = cameraSettings.rotation * Vector3.forward;
-                cameraSettings.position += -camDist3P * viewDir;
-                cameraSettings.position += lookRotation*Vector3.right*0.5f + lookRotation*Vector3.up*0.5f;
-                break;
-            }
+                var cameraOffset = -camDist3P * viewDir
+                    + lookRotation * Vector3.right * 0.8f
+                    + lookRotation * Vector3.up * 0.8f;
+                var desiredCameraPosition = eyePos + cameraOffset;
+
+                if (Physics.Raycast(eyePos, cameraOffset.normalized, out var cameraHit,
+                    cameraOffset.magnitude, 1 << LayerMask.NameToLayer("Default"),
+                    QueryTriggerInteraction.Ignore))
+                {
+                    desiredCameraPosition = eyePos + cameraOffset.normalized *
+                        Mathf.Max(cameraHit.distance - 0.15f, 0.1f);
+                }
+
+                cameraSettings.position = desiredCameraPosition;
+                var aimDirection = lookRotation * Vector3.forward;
+                var aimPoint = eyePos + aimDirection * k_thirdPersonAimDistance;
+                var aimLayerMask = ~0;
+                if (Physics.Raycast(eyePos + aimDirection * 0.5f, aimDirection, out var aimHit,
+                    k_thirdPersonAimDistance, aimLayerMask, QueryTriggerInteraction.Ignore))
+                {
+                    aimPoint = aimHit.point;
+                }
+                cameraSettings.rotation = Quaternion.LookRotation(aimPoint - desiredCameraPosition, Vector3.up);
+            break;
         }
+    }
         
         
         // TODO (mogensh) find better place to put this. 
@@ -267,6 +329,26 @@ public class UpdateCharacterCamera : BaseComponentSystem<LocalPlayer,LocalPlayer
         {
             character.ShowHistory(m_world.worldTime.tick);
         }
+    }
+
+    string GetCurrentHeroName()
+    {
+        var localPlayerGroup = GetComponentGroup(typeof(LocalPlayer));
+        var localPlayerArray = localPlayerGroup.GetComponentArray<LocalPlayer>();
+        for (var index = 0; index < localPlayerArray.Length; index++)
+        {
+            var localPlayer = localPlayerArray[index];
+            if (localPlayer.controlledEntity == Entity.Null ||
+                !EntityManager.Exists(localPlayer.controlledEntity) ||
+                !EntityManager.HasComponent<Character>(localPlayer.controlledEntity))
+                continue;
+
+            var character = EntityManager.GetComponentObject<Character>(localPlayer.controlledEntity);
+            if (character != null && character.heroTypeData != null)
+                return character.heroTypeData.name;
+        }
+
+        return null;
     }
 
     bool forceThirdPerson;

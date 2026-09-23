@@ -36,6 +36,16 @@ public class IngameHUD : MonoBehaviour
         m_Crosshair.ShowHitMarker(lethal);
     }
 
+    public void SetThirdPersonAim(Camera camera, Vector3 aimPoint)
+    {
+        m_Crosshair.SetThirdPersonAim(camera, aimPoint);
+    }
+
+    public void ResetThirdPersonAim()
+    {
+        m_Crosshair.ResetThirdPersonAim();
+    }
+
     [SerializeField] SoundDef m_HitMarkerSound;
     [SerializeField] SoundDef m_LethalHitSound;
 }

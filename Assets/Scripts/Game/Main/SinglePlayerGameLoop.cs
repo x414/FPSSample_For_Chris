@@ -95,6 +95,13 @@ public class SinglePlayerGameLoop : Game.IGameLoop
     bool m_AutoStart;
     bool m_DeveloperSelfTest;
     bool m_VoiceSelfTest;
+    bool m_VisualSelfTest;
+    bool m_VisualSelfTestThirdPersonRequested;
+    bool m_VisualSelfTestGunRequested;
+    bool m_VisualSelfTestScope;
+    string m_VisualSelfTestGun;
+    float m_VisualSelfTestStartTime;
+    int m_VisualSelfTestScreenshotIndex;
     bool m_PlayerDeathTracked;
     int m_LastBonusWave;
    int m_NextBotPlayerId = 100;
@@ -132,12 +139,19 @@ public class SinglePlayerGameLoop : Game.IGameLoop
                 m_DeveloperSelfTest = true;
             else if (string.Equals(argument, "voice-selftest", StringComparison.OrdinalIgnoreCase))
                 m_VoiceSelfTest = true;
+            else if (string.Equals(argument, "visual-selftest", StringComparison.OrdinalIgnoreCase))
+                m_VisualSelfTest = true;
+            else if (argument.StartsWith("selftest-gun=", StringComparison.OrdinalIgnoreCase))
+                m_VisualSelfTestGun = argument.Substring("selftest-gun=".Length);
+            else if (string.Equals(argument, "selftest-scope", StringComparison.OrdinalIgnoreCase))
+                m_VisualSelfTestScope = true;
         }
 
         m_DiffConfig = DifficultyConfig.GetConfig(m_Difficulty.ToString());
         m_PlayTimeTracker = new DailyPlayTimeTracker();
         if (m_DeveloperSelfTest)
             GameDebug.Log("Developer self-test active; daily play time recording disabled.");
+        Debug.Log($"SinglePlayer visual self-test flags: visual={m_VisualSelfTest} gun={m_VisualSelfTestGun} scope={m_VisualSelfTestScope}");
         m_ScoreManager = new ScoreManager();
         m_TimerManager = new TimerManager(20f);
         m_GameOver = false;
@@ -393,7 +407,8 @@ public class SinglePlayerGameLoop : Game.IGameLoop
             m_HudUI.UpdatePlayerHealth(m_PlayerHealth, m_DiffConfig.playerMaxHealth);
         }
 
-        m_HudUI.UpdatePlayTimeWarning(!m_DeveloperSelfTest && m_PlayTimeWarningTimer > 0f
+        var playTimeExempt = IsPlayTimeExempt(m_Mode);
+        m_HudUI.UpdatePlayTimeWarning(!playTimeExempt && m_PlayTimeWarningTimer > 0f
             ? m_PlayTimeTracker.GetTenMinuteWarningMessage()
             : string.Empty);
 
@@ -403,9 +418,9 @@ public class SinglePlayerGameLoop : Game.IGameLoop
             OnGameOver("Time's up!");
         }
 
-        if (!m_DeveloperSelfTest)
+        if (!playTimeExempt)
             m_PlayTimeTracker.Record(Time.unscaledDeltaTime, Game.GetMousePointerLock());
-        bool isPlayTimeLimited = !m_DeveloperSelfTest && !IsTestMode() && m_Mode != Mode.AIBattle;
+        bool isPlayTimeLimited = !playTimeExempt;
         if (isPlayTimeLimited && m_PlayTimeTracker.IsLimitReached)
             OnGameOver(m_PlayTimeTracker.GetLimitMessage());
     }
@@ -440,8 +455,7 @@ public class SinglePlayerGameLoop : Game.IGameLoop
     void ConfirmSelection(Mode mode, Difficulty difficulty)
     {
         if (m_GameplayStarted) return;
-        bool isQuickMode = IsTestMode(mode) || mode == Mode.AIBattle;
-        if (!m_DeveloperSelfTest && !isQuickMode && m_PlayTimeTracker != null &&
+        if (!IsPlayTimeExempt(mode) && m_PlayTimeTracker != null &&
             m_PlayTimeTracker.IsLimitReached) return;
 
         m_Mode = mode;
@@ -494,6 +508,8 @@ public class SinglePlayerGameLoop : Game.IGameLoop
 
         Game.SetMousePointerLock(true);
         m_GameplayStarted = true;
+        if (m_VisualSelfTest)
+            m_VisualSelfTestStartTime = Time.realtimeSinceStartup;
         if (m_DeveloperSelfTest && m_VoiceSelfTest)
             m_HudUI.AnnounceTestSequence();
         if (m_DeveloperSelfTest)
@@ -513,6 +529,11 @@ public class SinglePlayerGameLoop : Game.IGameLoop
     public static bool IsTestMode(Mode mode)
     {
         return mode == Mode.TestWave || mode == Mode.TestExplore;
+    }
+
+    bool IsPlayTimeExempt(Mode mode)
+    {
+        return m_DeveloperSelfTest || IsTestMode(mode) || mode == Mode.AIBattle;
     }
 
     public bool IsTestMode()
@@ -820,12 +841,19 @@ public class SinglePlayerGameLoop : Game.IGameLoop
             CmdSelectHero(new[] { requestedGun });
         }
 
+        if (m_VisualSelfTest)
+            UpdateVisualSelfTest();
+
         if (gameTime.tickRate != Game.serverTickRate.IntValue)
             gameTime.tickRate = Game.serverTickRate.IntValue;
 
         if ((Game.Input.GetKeyUp(KeyCode.H) || Game.Input.GetKeyUp(KeyCode.Joystick1Button6)) &&
             Game.allowCharChange.IntValue == 1)
             CmdNextHero(null);
+
+        if (!Console.IsOpen() &&
+            (Game.Input.GetKeyDown(KeyCode.C) || Game.Input.GetKeyDown(KeyCode.Joystick1Button9)))
+            m_CharacterModule.ToggleThirdPerson();
 
         bool commandWasConsumed = false;
         while (Game.frameTime > m_GameWorld.nextTickTime)
@@ -877,6 +905,72 @@ public class SinglePlayerGameLoop : Game.IGameLoop
         var charControl = m_GameWorld.GetEntityManager().GetComponentObject<PlayerCharacterControl>(playerEntity);
         charControl.requestedCharacterType = charSetupRegistry.entries.IndexOf(selectedHero);
         GameDebug.Log("Gun self-test selected: " + selectedHero.name);
+    }
+
+    void UpdateVisualSelfTest()
+    {
+        var elapsed = Time.realtimeSinceStartup - m_VisualSelfTestStartTime;
+        Debug.Log($"Visual self-test tick elapsed={elapsed:F2} phase={m_VisualSelfTestScreenshotIndex} gun={m_VisualSelfTestGun} tp={m_VisualSelfTestThirdPersonRequested} gameplay={m_GameplayStarted}");
+        if (elapsed > 1.0f && string.IsNullOrEmpty(m_VisualSelfTestGun))
+        {
+            m_VisualSelfTestGun = "Hero_M4A1";
+            GameDebug.Log("Visual self-test: default gun selected.");
+        }
+        if (elapsed > 1.0f && !m_VisualSelfTestGunRequested && m_GameplayStarted)
+        {
+            CmdSelectHero(new[] { m_VisualSelfTestGun });
+            m_VisualSelfTestGunRequested = true;
+            m_VisualSelfTestScreenshotIndex = -1;
+            GameDebug.Log("Visual self-test: gun requested " + m_VisualSelfTestGun);
+        }
+        if (elapsed > 3.0f && !m_VisualSelfTestThirdPersonRequested)
+        {
+            m_CharacterModule.ToggleThirdPerson();
+            m_VisualSelfTestThirdPersonRequested = true;
+            m_VisualSelfTestScreenshotIndex = 0;
+            GameDebug.Log("Visual self-test: third person enabled.");
+        }
+        if (m_VisualSelfTestScope && elapsed > 6.5f && m_VisualSelfTestScreenshotIndex == 3 && !AutomaticRifleUI.selfTestScopeForced)
+        {
+            AutomaticRifleUI.selfTestScopeForced = true;
+            AutomaticRifleUI.IsM700Scoped = true;
+            ForceM700AbilityAiming();
+            m_VisualSelfTestScreenshotIndex = 3;
+            GameDebug.Log("Visual self-test: M700 scope forced.");
+        }
+        if (elapsed > 5.0f && m_VisualSelfTestScreenshotIndex >= 0 && m_VisualSelfTestScreenshotIndex < 3)
+        {
+            var screenshotIndex = m_VisualSelfTestScreenshotIndex;
+            UpdateCharacterCamera.selfTestCameraYaw = screenshotIndex * 90f;
+            m_VisualSelfTestScreenshotIndex++;
+            var fileName = $"D:/Codex_Project/FPS-Unity/FPSSample/Build/Windows64/selftest_{m_VisualSelfTestGun}_{screenshotIndex}.png";
+            ScreenCapture.CaptureScreenshot(fileName);
+            GameDebug.Log($"Visual self-test: captured {fileName}");
+        }
+        if (m_VisualSelfTestScope && elapsed > 7.5f && m_VisualSelfTestScreenshotIndex == 4)
+        {
+            var screenshotIndex = m_VisualSelfTestScreenshotIndex;
+            UpdateCharacterCamera.selfTestCameraYaw = 45f;
+            m_VisualSelfTestScreenshotIndex++;
+            var fileName = $"D:/Codex_Project/FPS-Unity/FPSSample/Build/Windows64/selftest_{m_VisualSelfTestGun}_{screenshotIndex}.png";
+            ScreenCapture.CaptureScreenshot(fileName);
+            GameDebug.Log($"Visual self-test: captured {fileName} with scope");
+        }
+        if (elapsed > 9.0f)
+            Application.Quit();
+    }
+
+    void ForceM700AbilityAiming()
+    {
+        if (m_Player == null || m_Player.controlledEntity == Entity.Null || m_GameWorld == null) return;
+        var entityManager = m_GameWorld.GetEntityManager();
+        var characterReplicatedData = entityManager.GetComponentData<CharacterReplicatedData>(m_Player.controlledEntity);
+        var ability = characterReplicatedData.FindAbilityWithComponent(entityManager, typeof(Ability_AutoRifle.PredictedState));
+        if (ability == Entity.Null) return;
+        var state = entityManager.GetComponentData<Ability_AutoRifle.PredictedState>(ability);
+        state.aiming = true;
+        state.lastAimButton = true;
+        entityManager.SetComponentData(ability, state);
     }
 
     void CmdSpectatorCam(string[] args)
