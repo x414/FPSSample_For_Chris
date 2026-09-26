@@ -33,14 +33,26 @@ public class CharacterMoveQuery : MonoBehaviour
         this.settings = settings;
         var go = new GameObject("MoveColl_" + name,typeof(CharacterController), typeof(HitCollision));
         charController = go.GetComponent<CharacterController>();
-        charController.transform.position = transform.position;
+        var spawnCharacter = GetComponent<Character>();
+        var spawnPosition = spawnCharacter != null && spawnCharacter.m_TeleportPending
+            ? spawnCharacter.m_TeleportToPosition
+            : transform.position;
+        var spawnRotation = spawnCharacter != null && spawnCharacter.m_TeleportPending
+            ? spawnCharacter.m_TeleportToRotation
+            : transform.rotation;
+
+        charController.enabled = false;
+        charController.transform.position = spawnPosition;
+        charController.transform.rotation = spawnRotation;
         charController.slopeLimit = settings.slopeLimit;
         charController.stepOffset = settings.stepOffset;
         charController.skinWidth = settings.skinWidth;
         charController.minMoveDistance = settings.minMoveDistance;
         charController.center = settings.center; 
-        charController.radius = settings.radius; 
+        charController.radius = settings.radius;
         charController.height = settings.height;
+        charController.enabled = true;
+        Physics.SyncTransforms();
 
         var hitCollision = go.GetComponent<HitCollision>();
         hitCollision.owner = hitCollOwner;
@@ -78,6 +90,7 @@ class HandleMovementQueries : BaseComponentSystem
             var query = queryArray[i];
 
             var charController = query.charController;
+            var queryCharacter = query.GetComponent<Character>();
 
             if (charController.gameObject.layer != query.collisionLayer)
                 charController.gameObject.layer = query.collisionLayer;
@@ -87,11 +100,22 @@ class HandleMovementQueries : BaseComponentSystem
             {
                 currentControllerPos = query.moveQueryStart;
                 charController.transform.position = currentControllerPos;
+                Physics.SyncTransforms();
             }
 
             var deltaPos = query.moveQueryEnd - currentControllerPos; 
             charController.Move(deltaPos);
-            query.moveQueryResult = charController.transform.position;
+            var moveResult = charController.transform.position;
+            var maxResponseDistance = math.distance(query.moveQueryStart, query.moveQueryEnd) + 0.75f;
+            if (queryCharacter != null && queryCharacter.teamId == 1 &&
+                math.distance(moveResult, query.moveQueryEnd) > maxResponseDistance)
+            {
+                charController.transform.position = query.moveQueryEnd;
+                Physics.SyncTransforms();
+                moveResult = query.moveQueryEnd;
+            }
+
+            query.moveQueryResult = moveResult;
             query.isGrounded = charController.isGrounded;
         }
         

@@ -8,6 +8,9 @@ public class AutomaticRifleUI : AbilityUI
 {
     public static bool IsM700Scoped;
     public static bool selfTestScopeForced;
+    public static event System.Action<bool> ScopeChanged;
+
+    bool m_LastVoiceScope;
 
     public override void UpdateAbilityUI(EntityManager entityManager, ref GameTime time)
     {
@@ -19,6 +22,11 @@ public class AutomaticRifleUI : AbilityUI
 		var settings = entityManager.GetComponentData<Ability_AutoRifle.Settings>(ability);
 		var isAiming = Ability_AutoRifle.IsAiming(entityManager, abilityOwner);
 		IsM700Scoped = isAiming || selfTestScopeForced;
+		if (ScopeChanged != null && m_LastVoiceScope != IsM700Scoped)
+		{
+			m_LastVoiceScope = IsM700Scoped;
+			ScopeChanged(IsM700Scoped);
+		}
 		if (selfTestScopeForced)
 			Debug.Log($"M700 self-test scope UI: isAiming={isAiming} forced={selfTestScopeForced} overlay={(m_ScopeOverlayRoot == null ? "null" : m_ScopeOverlayRoot.activeSelf.ToString())}");
 		if (IsM700Scoped && Input.GetKeyUp(KeyCode.Escape))

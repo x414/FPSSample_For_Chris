@@ -12,6 +12,8 @@ public class WaveManager
     public int waveKilledEnemies { get; private set; }
     public float waveBreakTimer { get; private set; }
     public int enemiesAlive => m_AliveRobots.Count;
+    public int remainingEnemies => m_AliveRobots.Count + m_PendingRobots.Count;
+    public List<AIController> activeRobots => m_AliveRobots;
     int maxActiveRobots => Mathf.Max(1, m_Config.maxActiveRobots);
 
     struct RobotSpawnRequest
@@ -54,7 +56,7 @@ public class WaveManager
         waveBreakTimer = 5f;
     }
 
-    public void Tick(float deltaTime, Vector3 playerPos, System.Action<float> onShootPlayer, GameWorld world)
+    public void Tick(float deltaTime, Vector3 playerPos, GameWorld world)
     {
         if (isWaveActive)
         {
@@ -62,17 +64,31 @@ public class WaveManager
             {
                 var robot = m_AliveRobots[i];
                 robot.UpdateEntity(world);
-                robot.Tick(deltaTime, playerPos, onShootPlayer);
+                robot.Tick(deltaTime, playerPos);
                 robot.ApplyCommand(world, world.worldTime.tick);
-               if (!robot.isAlive)
+               if (!robot.isAlive || robot.isSearchStuck)
                {
-                   m_OnRobotKilled?.Invoke(robot);
-                    waveKilledEnemies++;
-                   m_DeadRobots.Add(new DeadRobotCleanup
+                   if (robot.isAlive)
                    {
-                       robot = robot,
-                       timeUntilCleanup = DespawnDelay
-                   });
+                       GameDebug.Log($"Recycling search-stuck {robot.robotType} at {robot.entity}");
+                       robot.BeginFadeOut(FadeOutDuration);
+                       m_DeadRobots.Add(new DeadRobotCleanup
+                       {
+                           robot = robot,
+                           timeUntilCleanup = FadeOutDuration + 0.2f,
+                           fadeOutStarted = true
+                       });
+                   }
+                   else
+                   {
+                       m_OnRobotKilled?.Invoke(robot);
+                       waveKilledEnemies++;
+                       m_DeadRobots.Add(new DeadRobotCleanup
+                       {
+                           robot = robot,
+                           timeUntilCleanup = DespawnDelay
+                       });
+                   }
                     m_AliveRobots.RemoveAt(i);
                 }
             }
@@ -176,9 +192,7 @@ public class WaveManager
         var angle = request.angle;
         var entryDist = request.entryDist;
         var spawnDist = request.spawnDist;
-        var direction = m_SpawnForward.sqrMagnitude > 0.01f
-            ? Quaternion.AngleAxis(Random.Range(-20f, 20f), Vector3.up) * m_SpawnForward
-            : new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle));
+        var direction = new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle));
         direction.y = 0f;
         direction.Normalize();
         var entryTarget = m_SpawnCenter + direction * entryDist;

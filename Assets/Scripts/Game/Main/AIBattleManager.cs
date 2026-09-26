@@ -17,6 +17,7 @@ public class AIBattleManager
     public int robotMaxHealth => m_Robots.Count > 0 ? m_Robots[0].maxHealth : 0;
     public bool isRobotAlive => m_Robots.Count > 0 && m_Robots[0].isAlive;
     public string robotName => m_Robots.Count > 0 ? m_Robots[0].robotType.ToString() : "A3";
+    public List<AIController> activeRobots => m_Robots;
 
     public AIBattleManager(DifficultyConfig config, Vector3 spawnCenter, Vector3 spawnForward,
         System.Action<AIController> onRobotKilled, System.Action<AIController, Vector3> createRobotEntity)
@@ -52,7 +53,7 @@ public class AIBattleManager
         GameDebug.Log($"AIBattle: Spawned A3_Tactician at {position}");
     }
 
-    public void Tick(float deltaTime, Vector3 playerPos, System.Action<float> onShootPlayer, GameWorld world)
+    public void Tick(float deltaTime, Vector3 playerPos, GameWorld world)
     {
         m_ElapsedTime += deltaTime;
         var inGracePeriod = m_ElapsedTime < EntitySpawnGracePeriod;
@@ -61,7 +62,7 @@ public class AIBattleManager
         {
             var robot = m_Robots[i];
             robot.UpdateEntity(world);
-            robot.Tick(deltaTime, playerPos, onShootPlayer);
+            robot.Tick(deltaTime, playerPos);
             robot.ApplyCommand(world, world.worldTime.tick);
 
             if (inGracePeriod)

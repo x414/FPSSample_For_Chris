@@ -9,6 +9,10 @@ using UnityEngine.Profiling;
 [CreateAssetMenu(fileName = "Ability_AutoRifle", menuName = "FPS Sample/Abilities/Ability_AutoRifle")]
 public class Ability_AutoRifle : CharBehaviorFactory
 {
+	public static Action<State, State, int, int, int> LocalStateChanged;
+	public static Action ReloadStarted;
+	public static Action ReloadCompleted;
+
 	public enum State
 	{
 		Idle,
@@ -262,6 +266,8 @@ class AutoRifle_Update : BaseComponentDataSystem<CharBehaviour,AbilityControl,Ab
 
 		var command = EntityManager.GetComponentData<UserCommandComponentData>(charAbility.character).command;
 		var healthState = EntityManager.GetComponentData<HealthStateData>(charAbility.character);
+		var previousAction = predictedState.action;
+		var previousAmmoInClip = predictedState.ammoInClip;
 		var supportsScope = settings.aimButton != UserCommand.Button.None && settings.aimFieldOfView > 0f;
 		if (!supportsScope || healthState.health <= 0)
 		{
@@ -324,6 +330,8 @@ class AutoRifle_Update : BaseComponentDataSystem<CharBehaviour,AbilityControl,Ab
 				{
 					var neededInClip = settings.clipSize - predictedState.ammoInClip;
 					predictedState.ammoInClip += neededInClip;
+					if (Ability_AutoRifle.ReloadCompleted != null)
+						Ability_AutoRifle.ReloadCompleted();
 
 					EnterIdlePhase(abilityEntity, ref abilityCtrl, ref predictedState, m_world.worldTime.tick);
 				}
@@ -331,6 +339,10 @@ class AutoRifle_Update : BaseComponentDataSystem<CharBehaviour,AbilityControl,Ab
 				break;
 			}
 		}
+
+		if (Ability_AutoRifle.LocalStateChanged != null &&
+		    (previousAction != predictedState.action || previousAmmoInClip != predictedState.ammoInClip))
+			Ability_AutoRifle.LocalStateChanged(previousAction, predictedState.action, previousAmmoInClip, predictedState.ammoInClip, settings.clipSize);
 	}
 
 	void EnterReloadingPhase(Entity abilityEntity, ref AbilityControl abilityCtrl, 
@@ -344,6 +356,8 @@ class AutoRifle_Update : BaseComponentDataSystem<CharBehaviour,AbilityControl,Ab
 		abilityCtrl.behaviorState = AbilityControl.State.Active;
 		predictedState.SetPhase(Ability_AutoRifle.State.Reload, tick);
 		charPredictedState.SetAction(CharacterPredictedData.Action.Reloading, tick);
+		if (Ability_AutoRifle.ReloadStarted != null)
+			Ability_AutoRifle.ReloadStarted();
 
 		EntityManager.SetComponentData(abilityEntity, abilityCtrl);
 		EntityManager.SetComponentData(abilityEntity, predictedState);

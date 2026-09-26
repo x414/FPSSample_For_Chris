@@ -329,6 +329,7 @@ public class SinglePlayerHudUI : MonoBehaviour
     Text m_PlayTimeWarningText;
     Text m_PlayerHealthText;
     GameObject m_PlayerHealthBackground;
+    int m_LastLoggedPlayerHealth = int.MaxValue;
     SinglePlayerVoiceAnnouncer m_VoiceAnnouncer;
     string m_LastWaveAnnouncement;
     void Awake()
@@ -408,8 +409,18 @@ public class SinglePlayerHudUI : MonoBehaviour
 
     public void UpdatePlayerHealth(float health, float maxHealth)
     {
-        m_PlayerHealthBackground.gameObject.SetActive(true);
-        m_PlayerHealthText.text = $"HP: {Mathf.CeilToInt(health)} / {Mathf.CeilToInt(maxHealth)}";
+        m_PlayerHealthBackground.gameObject.SetActive(false);
+
+        var displayedHealth = Mathf.CeilToInt(health);
+        if (displayedHealth < m_LastLoggedPlayerHealth)
+        {
+            GameDebug.Log($"Player HP: {displayedHealth}/{Mathf.CeilToInt(maxHealth)}");
+            m_LastLoggedPlayerHealth = displayedHealth;
+        }
+        else if (displayedHealth > m_LastLoggedPlayerHealth)
+        {
+            m_LastLoggedPlayerHealth = displayedHealth;
+        }
     }
 
     Font CreateFont()

@@ -23,6 +23,7 @@ public class AIController
 {
     public RobotType robotType { get; private set; }
     public AIState state { get; private set; }
+    public bool isRetreating => m_IsRetreating;
     public int health { get; private set; }
     public int maxHealth { get; private set; }
     public Entity entity { get; set; }
@@ -38,7 +39,7 @@ public class AIController
     Vector3 m_EntryTarget;
     float m_MoveSpeed;
     float m_ShootInterval;
-    float m_HitChance;
+    float m_AimErrorAngle;
     float m_DetectionRadius;
     Vector3 m_PatrolOrigin;
     Vector3 m_PatrolTarget;
@@ -57,7 +58,10 @@ public class AIController
     Vector3 m_PreviousPlayerPosition;
     bool m_HasPreviousPlayerPosition;
     float m_PlayerStationaryTime;
-    int m_TacticianMissedShotStreak;
+    float m_SearchStuckTimer;
+    float m_BestSearchDistance;
+    bool m_HasSearchDistance;
+    bool m_IsSearchStuck;
 
     // A3 Tactician behavior fields
     float m_StrafeTimer;
@@ -74,13 +78,15 @@ public class AIController
     float m_LostSightTime;
     float m_RecoveryCooldown;
     Vector3 m_RecoveryPosition;
-    bool m_HasRecoveryPosition;
+    bool m_WantsJump;
+    bool m_IsOnGround;
 
     public float DesiredLookYaw { get; private set; }
     public float DesiredLookPitch { get; private set; }
     public float DesiredMoveMagnitude { get; private set; }
     public float DesiredMoveYaw { get; private set; }
     public bool WantsFire { get; private set; }
+    public bool isSearchStuck => m_IsSearchStuck;
 
     public void Despawn(GameWorld world)
     {
@@ -142,7 +148,7 @@ public class AIController
         m_PatrolOrigin = spawnPos;
         m_MoveSpeed = config.robotMoveSpeed;
         m_ShootInterval = config.shootInterval;
-        m_HitChance = config.hitChance;
+        m_AimErrorAngle = config.aimErrorAngle;
         m_DetectionRadius = config.detectionRadius;
 
         maxHealth = type == RobotType.A1_Infantry
@@ -165,7 +171,7 @@ public class AIController
         }
     }
 
-    public void Tick(float deltaTime, Vector3 playerPos, System.Action<float> onShootPlayer)
+    public void Tick(float deltaTime, Vector3 playerPos)
     {
         if (!isAlive) return;
 
@@ -174,6 +180,7 @@ public class AIController
         m_HasPlannedAim = false;
         UpdatePlayerMovementProfile(playerPos, deltaTime);
         var canSeePlayer = CanSeePlayer(playerPos, distToPlayer);
+        UpdateSearchProgress(playerPos, distToPlayer, canSeePlayer, deltaTime);
         UpdateStuckState(deltaTime, playerPos, distToPlayer, canSeePlayer);
 
         if (robotType == RobotType.A3_Tactician && !m_HasReacted && distToPlayer < m_DetectionRadius)
@@ -294,7 +301,7 @@ public class AIController
                     if (robotType == RobotType.A3_Tactician)
                     {
                         UpdateStrafe(deltaTime);
-                        UpdateTacticianBurstFire(deltaTime, onShootPlayer, playerPos, distToPlayer, canSeePlayer);
+                        UpdateTacticianBurstFire(deltaTime, playerPos, canSeePlayer);
                     }
                     else
                     {
@@ -303,8 +310,7 @@ public class AIController
                         {
                             m_ShootTimer = 0;
                             m_FireThisTick = true;
-                            if (UnityEngine.Random.value <= m_HitChance)
-                                onShootPlayer?.Invoke(robotType == RobotType.A2_Hunter ? 14 : 8);
+                            PlanShot(playerPos, canSeePlayer);
                         }
                     }
                 }
@@ -332,8 +338,7 @@ public class AIController
             StartStrafe();
     }
 
-    void UpdateTacticianBurstFire(float deltaTime, System.Action<float> onShootPlayer,
-        Vector3 playerPos, float distanceToPlayer, bool canSeePlayer)
+    void UpdateTacticianBurstFire(float deltaTime, Vector3 playerPos, bool canSeePlayer)
     {
         if (m_BurstPauseTimer > 0f)
         {
@@ -354,32 +359,7 @@ public class AIController
             m_ShootTimer = 0f;
             m_BurstShotsRemaining--;
             m_FireThisTick = true;
-
-            var hitChance = CalculateTacticianHitChance(distanceToPlayer, canSeePlayer);
-            var didHit = UnityEngine.Random.value <= hitChance;
-            var eyePosition = m_Position + Vector3.up * 1.5f;
-            var targetPosition = playerPos + Vector3.up * 1.2f;
-            m_PlannedAimDirection = (targetPosition - eyePosition).normalized;
-
-            if (didHit)
-                m_TacticianMissedShotStreak = 0;
-            else if (canSeePlayer)
-                m_TacticianMissedShotStreak++;
-
-            if (!canSeePlayer)
-                m_PlannedAimDirection = Quaternion.AngleAxis(
-                    Mathf.Atan2(0.9f, Mathf.Max(1f, distanceToPlayer)) * Mathf.Rad2Deg *
-                    UnityEngine.Random.Range(1.05f, 1.35f) *
-                    (UnityEngine.Random.value > 0.5f ? 1f : -1f),
-                    Vector3.up) * m_PlannedAimDirection;
-            else if (!didHit)
-                m_PlannedAimDirection = Quaternion.AngleAxis(
-                    Mathf.Atan2(1.0f, Mathf.Max(1f, distanceToPlayer)) * Mathf.Rad2Deg *
-                    UnityEngine.Random.Range(1.1f, 1.45f) *
-                    (UnityEngine.Random.value > 0.5f ? 1f : -1f),
-                    Vector3.up) * m_PlannedAimDirection;
-
-            m_HasPlannedAim = true;
+            PlanShot(playerPos, canSeePlayer);
 
             if (m_BurstShotsRemaining <= 0)
                 m_BurstPauseTimer = m_ShootInterval * UnityEngine.Random.Range(1.2f, 2.0f);
@@ -399,29 +379,88 @@ public class AIController
         m_HasPreviousPlayerPosition = true;
     }
 
-    float CalculateTacticianHitChance(float distanceToPlayer, bool canSeePlayer)
+    void UpdateSearchProgress(Vector3 playerPos, float distanceToPlayer, bool canSeePlayer, float deltaTime)
     {
+        if (m_IsSearchStuck)
+            return;
+
+        if (state != AIState.Enter && state != AIState.Chase)
+        {
+            m_SearchStuckTimer = 0f;
+            m_HasSearchDistance = false;
+            return;
+        }
+
+        if (m_IsRetreating || canSeePlayer || distanceToPlayer <= 8f)
+        {
+            m_SearchStuckTimer = 0f;
+            m_BestSearchDistance = distanceToPlayer;
+            m_HasSearchDistance = true;
+            return;
+        }
+
+        if (!m_HasSearchDistance || distanceToPlayer < m_BestSearchDistance - 0.8f)
+        {
+            m_SearchStuckTimer = 0f;
+            m_BestSearchDistance = distanceToPlayer;
+            m_HasSearchDistance = true;
+            return;
+        }
+
+        m_SearchStuckTimer += deltaTime;
+        if (m_SearchStuckTimer >= 12f)
+        {
+            m_IsSearchStuck = true;
+            GameDebug.Log($"{robotType} search watchdog triggered at {m_Position} player:{playerPos}");
+        }
+    }
+
+    void PlanShot(Vector3 playerPos, bool canSeePlayer)
+    {
+        var eyePosition = m_Position + Vector3.up * 1.5f;
+        var targetPosition = playerPos + Vector3.up * 1.2f;
+        var aimDirection = (targetPosition - eyePosition).normalized;
+        if (canSeePlayer)
+            aimDirection = ApplyAimError(aimDirection);
+        else
+            targetPosition += Vector3.up * UnityEngine.Random.Range(0.8f, 1.6f);
+
         if (!canSeePlayer)
-            return 0f;
+            aimDirection = (targetPosition - eyePosition).normalized;
+        m_HasPlannedAim = true;
 
-        if (m_PlayerStationaryTime > 1.5f)
-            return 1f;
+        m_PlannedAimDirection = aimDirection;
+        DesiredLookYaw = GetCommandLookYaw(aimDirection);
+        DesiredLookPitch = GetCommandLookPitch(aimDirection);
+    }
 
-        if (m_TacticianMissedShotStreak >= 8)
-            return 1f;
+    Vector3 ApplyAimError(Vector3 aimDirection)
+    {
+        var right = Vector3.Cross(Vector3.up, aimDirection);
+        if (right.sqrMagnitude < 0.0001f)
+            right = Vector3.right;
 
-        var distanceFactor = Mathf.Lerp(1.45f, 0.8f, Mathf.Clamp01(distanceToPlayer / 25f));
-        var effectiveHitChance = m_HitChance * distanceFactor;
-        effectiveHitChance += Mathf.Min(0.12f * Mathf.Max(0, m_TacticianMissedShotStreak - 2), 0.48f);
+        right.Normalize();
+        var up = Vector3.Cross(aimDirection, right).normalized;
+        var azimuth = UnityEngine.Random.Range(0f, Mathf.PI * 2f);
+        var errorAngle = Mathf.Sqrt(UnityEngine.Random.value) * m_AimErrorAngle * Mathf.Deg2Rad;
+        var lateralDirection = right * Mathf.Cos(azimuth) + up * Mathf.Sin(azimuth);
+        return (aimDirection * Mathf.Cos(errorAngle) + lateralDirection * Mathf.Sin(errorAngle)).normalized;
+    }
 
-        if (m_PlayerStationaryTime > 0.6f)
-            effectiveHitChance += 0.18f;
-        if (distanceToPlayer < 8f)
-            effectiveHitChance += 0.15f;
-        else if (distanceToPlayer < 15f)
-            effectiveHitChance += 0.07f;
+    static float GetCommandLookYaw(Vector3 direction)
+    {
+        var yaw = Mathf.Atan2(direction.x, direction.z) * Mathf.Rad2Deg;
+        while (yaw < 0f)
+            yaw += 360f;
+        return yaw;
+    }
 
-        return Mathf.Clamp(effectiveHitChance, 0.05f, 0.9f);
+    static float GetCommandLookPitch(Vector3 direction)
+    {
+        return Mathf.Clamp(90f + Mathf.Atan2(
+            direction.y,
+            new Vector2(direction.x, direction.z).magnitude) * Mathf.Rad2Deg, 0f, 180f);
     }
 
     void UpdateFlank(float deltaTime, Vector3 playerPos, float distToPlayer)
@@ -461,7 +500,7 @@ public class AIController
 
     public void BeginEntry(Vector3 battlefieldPosition)
     {
-        battlefieldPosition.y = m_Position.y;
+        battlefieldPosition.y = ResolveGroundPosition(battlefieldPosition).y;
         m_EntryTarget = battlefieldPosition;
         m_TargetPosition = battlefieldPosition;
         m_PatrolOrigin = battlefieldPosition;
@@ -538,17 +577,6 @@ public class AIController
         {
             var predictedState = entityManager.GetComponentData<CharacterPredictedData>(entity);
             m_Position = predictedState.position;
-
-            if (entityManager.HasComponent<CharacterInterpolatedData>(entity))
-            {
-                var interpolatedState = entityManager.GetComponentData<CharacterInterpolatedData>(entity);
-                if (Vector3.SqrMagnitude(interpolatedState.position - predictedState.position) > 4f)
-                {
-                    interpolatedState.position = predictedState.position;
-                    entityManager.SetComponentData(entity, interpolatedState);
-                    GameDebug.Log($"AI presentation snap {robotType}: {predictedState.position}");
-                }
-            }
         }
 
         if (m_CharacterObject != null)
@@ -557,53 +585,16 @@ public class AIController
             if (character != null)
             {
                 character.teamId = 1;
-                foreach (var presentation in character.presentations)
-                {
-                    if (presentation != null &&
-                        Vector3.SqrMagnitude(presentation.transform.position - m_Position) > 4f)
-                    {
-                        presentation.transform.position = m_Position;
-                        GameDebug.Log($"AI root snap {robotType}: {m_Position}");
-                    }
-                }
-            }
-        }
-
-        if (m_HasRecoveryPosition && entityManager.HasComponent<Character>(entity))
-        {
-            var character = entityManager.GetComponentObject<Character>(entity);
-            if (!character.m_TeleportPending)
-            {
-                m_HasRecoveryPosition = false;
-                m_Position = m_RecoveryPosition;
-                m_TargetPosition = m_RecoveryPosition;
-                m_LostSightTime = 0f;
-                ClearDetour();
-                character.TeleportTo(m_RecoveryPosition, Quaternion.LookRotation(Vector3.forward));
+                m_IsOnGround = character.groundCollider != null && character.altitude <= 0.2f;
             }
         }
 
         if (m_Position.y < m_PatrolOrigin.y - 15f)
         {
-            var recoveredPosition = m_PatrolOrigin + Vector3.up * 0.2f;
-            if (entityManager.HasComponent<CharacterPredictedData>(entity))
-            {
-                var predictedState = entityManager.GetComponentData<CharacterPredictedData>(entity);
-                predictedState.velocity = Vector3.zero;
-                entityManager.SetComponentData(entity, predictedState);
-            }
-
-            if (entityManager.HasComponent<Character>(entity))
-            {
-                var character = entityManager.GetComponentObject<Character>(entity);
-                if (!character.m_TeleportPending)
-                    character.TeleportTo(recoveredPosition, Quaternion.identity);
-            }
-
-            m_Position = recoveredPosition;
-            m_TargetPosition = recoveredPosition;
+            m_PatrolTarget = ResolveGroundPosition(m_PatrolOrigin);
+            m_HasPatrolTarget = true;
             state = AIState.Patrol;
-            GameDebug.Log($"Recovered fallen {robotType} at {recoveredPosition}");
+            ClearDetour();
         }
 
        if (entityManager.HasComponent<HealthStateData>(entity))
@@ -645,9 +636,28 @@ public class AIController
         commandComponent.command.lookPitch = DesiredLookPitch;
         commandComponent.command.moveYaw = DesiredMoveYaw;
         commandComponent.command.moveMagnitude = DesiredMoveMagnitude;
+        commandComponent.command.buttons.Set(UserCommand.Button.Jump, m_WantsJump);
         commandComponent.command.buttons.Set(UserCommand.Button.PrimaryFire, m_FireThisTick);
         commandComponent.command.emote = CharacterEmote.None;
         entityManager.SetComponentData(entity, commandComponent);
+
+        if (entityManager.HasComponent<CharacterPredictedData>(entity))
+        {
+            var predictedState = entityManager.GetComponentData<CharacterPredictedData>(entity);
+            var maxHorizontalSpeed = Mathf.Max(4f, m_MoveSpeed * 1.5f);
+            var horizontalVelocity = new Vector2(predictedState.velocity.x, predictedState.velocity.z);
+            if (horizontalVelocity.sqrMagnitude > maxHorizontalSpeed * maxHorizontalSpeed)
+            {
+                horizontalVelocity *= maxHorizontalSpeed / horizontalVelocity.magnitude;
+                predictedState.velocity.x = horizontalVelocity.x;
+                predictedState.velocity.z = horizontalVelocity.y;
+            }
+
+            var maxAscentSpeed = Game.config.jumpAscentHeight / Game.config.jumpAscentDuration + 1f;
+            predictedState.velocity.y = Mathf.Clamp(
+                predictedState.velocity.y, -Game.config.maxFallVelocity, maxAscentSpeed);
+            entityManager.SetComponentData(entity, predictedState);
+        }
     }
 
     void UpdateDesiredMovement(Vector3 playerPos, float distToPlayer, float deltaTime)
@@ -663,17 +673,21 @@ public class AIController
         target = ResolveMoveTarget(target);
         direction = target - m_Position;
         direction.y = 0f;
+        var flatMoveDistance = new Vector2(direction.x, direction.z).magnitude;
+        m_WantsJump = m_IsOnGround && target.y - m_Position.y > 0.8f && flatMoveDistance < 8f;
 
-        if (direction.sqrMagnitude > 0.0001f)
+        if (m_HasPlannedAim)
         {
-            var targetYaw = Mathf.Atan2(direction.x, direction.z) * Mathf.Rad2Deg;
-            DesiredLookYaw = Mathf.MoveTowardsAngle(DesiredLookYaw, targetYaw, 270f * deltaTime);
+            DesiredLookYaw = GetCommandLookYaw(m_PlannedAimDirection);
+            DesiredLookPitch = GetCommandLookPitch(m_PlannedAimDirection);
         }
-
-        var aimDirection = m_HasPlannedAim
-            ? m_PlannedAimDirection
-            : playerPos + Vector3.up * 1.2f - (m_Position + Vector3.up * 1.5f);
-        DesiredLookPitch = Mathf.Clamp(90f - Mathf.Atan2(aimDirection.y, new Vector2(aimDirection.x, aimDirection.z).magnitude) * Mathf.Rad2Deg, 0f, 180f);
+        else if (direction.sqrMagnitude > 0.0001f)
+        {
+            var movementDirection = direction.normalized;
+            var targetYaw = GetCommandLookYaw(movementDirection);
+            DesiredLookYaw = Mathf.MoveTowardsAngle(DesiredLookYaw, targetYaw, 270f * deltaTime);
+            DesiredLookPitch = GetCommandLookPitch(movementDirection);
+        }
 
         var configuredSpeed = state == AIState.Patrol ? m_MoveSpeed * patrolSpeedFactor : m_MoveSpeed;
         if (m_DetourTimer > 0f && !m_HasDetourTarget && state == AIState.Patrol)
@@ -715,9 +729,12 @@ public class AIController
             {
                 if (TryFindRecoveryPosition(playerPos, out m_RecoveryPosition))
                 {
-                    m_HasRecoveryPosition = true;
+                    m_DetourTarget = m_RecoveryPosition;
+                    m_HasDetourTarget = true;
+                    m_DetourTimer = 3f;
                     m_RecoveryCooldown = 4f;
-                    GameDebug.Log($"AI recovery {robotType}: {m_Position} -> {m_RecoveryPosition}");
+                    m_LostSightTime = 0f;
+                    GameDebug.Log($"AI reroute {robotType}: {m_Position} -> {m_RecoveryPosition}");
                 }
             }
         }
@@ -859,7 +876,7 @@ public class AIController
                 var angle = step * 22.5f + UnityEngine.Random.Range(-6f, 6f);
                 var direction = Quaternion.AngleAxis(angle, Vector3.up) * Vector3.forward;
                 var candidate = playerPos + direction * radius;
-                candidate.y = playerPos.y;
+                candidate.y = ResolveGroundPosition(candidate).y;
 
                 if (!IsClearRecoveryPosition(candidate) ||
                     !HasClearLine(candidate + Vector3.up * 1.5f, playerEye))
@@ -881,11 +898,11 @@ public class AIController
     static bool IsClearRecoveryPosition(Vector3 position)
     {
         if (!Physics.Raycast(position + Vector3.up * 2f, Vector3.down, 5f,
-            Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
+            CombatLayers.GroundMask, QueryTriggerInteraction.Ignore))
             return false;
 
         return !Physics.CheckSphere(position + Vector3.up * 0.8f, 0.55f,
-            Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
+            CombatLayers.CombatRaycastMask, QueryTriggerInteraction.Ignore);
     }
 
     static bool HasClearLine(Vector3 from, Vector3 to)
@@ -899,7 +916,7 @@ public class AIController
     static bool TryFindObstacle(Vector3 origin, Vector3 direction, float distance, out RaycastHit obstacle)
     {
         obstacle = default(RaycastHit);
-        var hits = Physics.RaycastAll(origin, direction, distance, Physics.DefaultRaycastLayers,
+        var hits = Physics.RaycastAll(origin, direction, distance, CombatLayers.CombatRaycastMask,
             QueryTriggerInteraction.Ignore);
         System.Array.Sort(hits, (left, right) => left.distance.CompareTo(right.distance));
 
@@ -914,6 +931,23 @@ public class AIController
         }
 
         return false;
+    }
+
+    static Vector3 ResolveGroundPosition(Vector3 position)
+    {
+        var hits = Physics.RaycastAll(position + Vector3.up * 4f, Vector3.down, 24f,
+            CombatLayers.GroundMask, QueryTriggerInteraction.Ignore);
+        System.Array.Sort(hits, (left, right) => left.distance.CompareTo(right.distance));
+
+        foreach (var hit in hits)
+        {
+            if (hit.collider == null || hit.collider.GetComponentInParent<Character>() != null)
+                continue;
+
+            return hit.point + Vector3.up * 0.2f;
+        }
+
+        return position;
     }
 
     void ApplyVariantColor()
@@ -1016,9 +1050,14 @@ public class AIController
 
     void MoveTowards(Vector3 target, float deltaTime, float speed)
     {
-        var dir = (target - m_Position).normalized;
-        m_Position += dir * speed * deltaTime;
-        m_Rotation = Quaternion.LookRotation(dir);
+        var direction = target - m_Position;
+        direction.y = 0f;
+        if (direction.sqrMagnitude > 0.0001f)
+        {
+            direction.Normalize();
+            m_Position += direction * speed * deltaTime;
+            m_Rotation = Quaternion.LookRotation(direction);
+        }
     }
 
     void SelectPatrolTarget()
@@ -1029,6 +1068,7 @@ public class AIController
             var distance = UnityEngine.Random.Range(patrolMinWaypointDistance, patrolRadius);
             var candidate = m_PatrolOrigin + new Vector3(
                 Mathf.Cos(angle) * distance, 0f, Mathf.Sin(angle) * distance);
+            candidate.y = ResolveGroundPosition(candidate).y;
             var direction = candidate - m_Position;
             direction.y = 0f;
 

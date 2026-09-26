@@ -10,6 +10,23 @@ public enum SinglePlayerState
     Loading,
     Active
 }
+
+public enum RobotSpawnTier
+{
+    High,
+    Low,
+    Other
+}
+
+public class RobotSpawnNode
+{
+    public Vector3 position;
+    public RobotSpawnTier tier;
+    public readonly List<int> nextNodes = new List<int>();
+    public readonly List<int> previousNodes = new List<int>();
+    public bool reachableFromCenter;
+    public bool canReachCenter;
+}
 public class SinglePlayerGameLoop : Game.IGameLoop
 {
     public static bool suppressRealPlayerDamage;
@@ -89,8 +106,7 @@ public class SinglePlayerGameLoop : Game.IGameLoop
     int m_RocketBaselineKills;
     float[] m_RocketShotSchedule;
     float m_RocketShotBaseTime;
-
-   bool m_GameOver;
+    bool m_GameOver;
     bool m_GameplayStarted;
     bool m_AutoStart;
     bool m_DeveloperSelfTest;
@@ -104,14 +120,36 @@ public class SinglePlayerGameLoop : Game.IGameLoop
     int m_VisualSelfTestScreenshotIndex;
     bool m_PlayerDeathTracked;
     int m_LastBonusWave;
-   int m_NextBotPlayerId = 100;
+    int m_NextWaveVoiceWave = -1;
+    bool m_HealthCriticalAnnounced;
+    bool m_LastLifeAnnounced;
+    bool m_RocketReadyAnnounced;
+    bool m_RespawnCuePending;
+    bool m_TwoMinuteWarningAnnounced;
+    bool m_OneMinuteWarningAnnounced;
+    bool m_TenSecondWarningAnnounced;
+    bool m_Score1000Announced;
+    bool m_Score5000Announced;
+    bool m_Score10000Announced;
+    float m_RespawnCueTime;
+    readonly HashSet<AIController> m_AnnouncedHunters = new HashSet<AIController>();
+    readonly HashSet<AIController> m_AnnouncedRetreatingRobots = new HashSet<AIController>();
+    readonly List<Vector3> m_RecentRobotSpawnPositions = new List<Vector3>();
+    RobotSpawnTier m_LastRobotSpawnTier = RobotSpawnTier.Other;
+    int m_SameRobotSpawnTierCount;
+    float m_HighRobotSpawnY = float.MinValue;
+    readonly List<RobotSpawnNode> m_RobotSpawnNodes = new List<RobotSpawnNode>();
+    bool m_RobotSpawnGraphBuilt;
+    int m_NextBotPlayerId = 100;
     int m_LivesRemaining;
-   float m_PlayerHealth;
+    float m_PlayerHealth;
     float m_ShieldMultiplier = 1f;
     float m_PlayTimeWarningTimer;
     float m_StartupGraceTimer;
     string m_PendingGunName;
     const float StartupGracePeriod = 5f;
+    const float RobotSpawnScanRadius = 90f;
+    const float RobotSpawnScanSpacing = 2.5f;
 
     public bool Init(string[] args)
     {
@@ -151,7 +189,8 @@ public class SinglePlayerGameLoop : Game.IGameLoop
         m_PlayTimeTracker = new DailyPlayTimeTracker();
         if (m_DeveloperSelfTest)
             GameDebug.Log("Developer self-test active; daily play time recording disabled.");
-        Debug.Log($"SinglePlayer visual self-test flags: visual={m_VisualSelfTest} gun={m_VisualSelfTestGun} scope={m_VisualSelfTestScope}");
+        if (m_DeveloperSelfTest && m_VoiceSelfTest)
+            Debug.Log($"SinglePlayer voice self-test flags: visual={m_VisualSelfTest} gun={m_VisualSelfTestGun} scope={m_VisualSelfTestScope}");
         m_ScoreManager = new ScoreManager();
         m_TimerManager = new TimerManager(20f);
         m_GameOver = false;
@@ -164,6 +203,12 @@ public class SinglePlayerGameLoop : Game.IGameLoop
         Console.AddCommand("respawn", CmdRespawn, "Force a respawn", GetHashCode());
         Console.AddCommand("score", CmdShowScore, "Show current score", GetHashCode());
         Console.AddCommand("rocket", CmdFireRocket, "Fire rocket launcher. Optional arg 'nearest' auto-aims at nearest robot; 'ground' aims ahead/down for visual tests", GetHashCode());
+        Console.AddCommand("voiceall", CmdVoiceAll, "Play all voice announcement cues", GetHashCode());
+
+        Ability_AutoRifle.LocalStateChanged += OnAutoRifleStateChanged;
+        Ability_AutoRifle.ReloadStarted += OnWeaponReloadStarted;
+        Ability_AutoRifle.ReloadCompleted += OnWeaponReloadCompleted;
+        AutomaticRifleUI.ScopeChanged += OnScopeChanged;
 
         Console.SetOpen(false);
 
@@ -186,6 +231,10 @@ public class SinglePlayerGameLoop : Game.IGameLoop
        redirectedPlayerDamage = null;
        redirectedPlayerVisualHealth = null;
         redirectedPlayerEntity = Entity.Null;
+        Ability_AutoRifle.LocalStateChanged -= OnAutoRifleStateChanged;
+        Ability_AutoRifle.ReloadStarted -= OnWeaponReloadStarted;
+        Ability_AutoRifle.ReloadCompleted -= OnWeaponReloadCompleted;
+        AutomaticRifleUI.ScopeChanged -= OnScopeChanged;
         if (m_PlayTimeTracker != null)
             m_PlayTimeTracker.Flush();
 
@@ -268,6 +317,11 @@ public class SinglePlayerGameLoop : Game.IGameLoop
 
         var hudObject = new GameObject("SinglePlayerHud");
         m_HudUI = hudObject.AddComponent<SinglePlayerHudUI>();
+        if (m_VoiceSelfTest)
+        {
+            GameDebug.Log($"Voice self-test args: dev={m_DeveloperSelfTest} voice={m_VoiceSelfTest}");
+            m_HudUI.AnnounceTestSequence();
+        }
 
        Game.SetMousePointerLock(false);
         GameDebug.Log("SinglePlayer ready. Select mode and difficulty.");
@@ -356,8 +410,11 @@ public class SinglePlayerGameLoop : Game.IGameLoop
             UpdatePlayerLives();
 
        // Tick global timer
-        m_TimerManager.Tick(Time.deltaTime);
+       m_TimerManager.Tick(Time.deltaTime);
         m_ScoreManager.Tick(Time.deltaTime);
+        CheckComboBroken(Time.deltaTime);
+        CheckTimeWarnings();
+        CheckSurvivalVoice();
         m_PowerupManager.Tick(Time.deltaTime);
 
         // Get player position
@@ -366,13 +423,14 @@ public class SinglePlayerGameLoop : Game.IGameLoop
             : Vector3.zero;
 
         // Tick game mode
-        System.Action<float> onShootPlayer = (damage) => OnPlayerHit(damage);
-
         if ((m_Mode == Mode.Wave || m_Mode == Mode.TestWave) && m_WaveManager != null)
         {
-           m_WaveManager.Tick(Time.deltaTime, playerPos, onShootPlayer, m_GameWorld);
+           m_WaveManager.Tick(Time.deltaTime, playerPos, m_GameWorld);
            CheckWaveKills();
+           CheckRobotTactics(m_WaveManager.activeRobots);
+           CheckRemainingEnemies(m_WaveManager.remainingEnemies);
            var waveAnnouncement = m_WaveManager.GetAnnouncementText();
+           CheckNextWaveVoice();
             m_HudUI.UpdateStats(
                 "Lives: " + m_LivesRemaining + "    Score: " + m_ScoreManager.totalScore + "    Time: " + m_TimerManager.GetFormattedTime(),
                 m_WaveManager.GetProgressText(),
@@ -382,8 +440,10 @@ public class SinglePlayerGameLoop : Game.IGameLoop
         }
         else if ((m_Mode == Mode.Explore || m_Mode == Mode.TestExplore) && m_ExploreManager != null)
         {
-           m_ExploreManager.Tick(Time.deltaTime, playerPos, onShootPlayer, m_GameWorld);
+           m_ExploreManager.Tick(Time.deltaTime, playerPos, m_GameWorld);
            CheckExploreKills();
+           CheckRobotTactics(m_ExploreManager.activeRobots);
+           CheckRemainingEnemies(m_ExploreManager.remainingRobots);
             m_HudUI.UpdateStats(
                 "Lives: " + m_LivesRemaining + "    Score: " + m_ScoreManager.totalScore + "    Time: " + m_TimerManager.GetFormattedTime(),
                m_ExploreManager.GetProgressText(),
@@ -397,15 +457,17 @@ public class SinglePlayerGameLoop : Game.IGameLoop
             if (m_AIBattleManager == null)
                 return;
 
-            m_AIBattleManager.Tick(Time.deltaTime, playerPos, onShootPlayer, m_GameWorld);
+            m_AIBattleManager.Tick(Time.deltaTime, playerPos, m_GameWorld);
             if (m_StartupGraceTimer <= 0f)
                 CheckAIBattleKills();
+            CheckRobotTactics(m_AIBattleManager.activeRobots);
             m_HudUI.UpdateStats(
                 "Lives: " + m_LivesRemaining + "    Score: " + m_ScoreManager.totalScore + "    Time: " + m_TimerManager.GetFormattedTime(),
                 m_AIBattleManager.GetProgressText(),
                 "");
-            m_HudUI.UpdatePlayerHealth(m_PlayerHealth, m_DiffConfig.playerMaxHealth);
         }
+
+        m_HudUI.UpdatePlayerHealth(GetPlayerDisplayHealth(), m_DiffConfig.playerMaxHealth);
 
         var playTimeExempt = IsPlayTimeExempt(m_Mode);
         m_HudUI.UpdatePlayTimeWarning(!playTimeExempt && m_PlayTimeWarningTimer > 0f
@@ -428,7 +490,16 @@ public class SinglePlayerGameLoop : Game.IGameLoop
     void OnRobotKilled(AIController robot)
     {
         var isA2 = robot.robotType == RobotType.A2_Hunter;
+        if (robot.robotType == RobotType.A2_Hunter)
+            m_HudUI.AnnounceCue("HunterDestroyed");
+        else if (robot.robotType == RobotType.A3_Tactician)
+            m_HudUI.AnnounceCue("TacticianDestroyed");
+        else
+            m_HudUI.AnnounceCue("EnemyDestroyed");
+
         m_ScoreManager.AddKill(robot.robotType == RobotType.A3_Tactician ? 50 : isA2 ? 15 : 10, isA2);
+        CheckComboMilestones();
+        CheckScoreMilestones();
     }
 
     void CreateRobotEntity(AIController robot, Vector3 position)
@@ -449,7 +520,7 @@ public class SinglePlayerGameLoop : Game.IGameLoop
 
         CharacterSpawnRequest.Create(entityManager, 0, position, Quaternion.Euler(0f, UnityEngine.Random.Range(0f, 360f), 0f), playerEntity);
         robot.BindCharacter(player);
-        GameDebug.Log($"Spawned robot entity {player.playerName} at {position}");
+        GameDebug.Log($"Spawned robot entity {player.playerName} at {position} tier:{GetRobotSpawnTierName(position)}");
     }
 
     void ConfirmSelection(Mode mode, Difficulty difficulty)
@@ -466,7 +537,21 @@ public class SinglePlayerGameLoop : Game.IGameLoop
        redirectedPlayerVisualHealth = mode == Mode.AIBattle ? (System.Func<int>)GetPlayerVisualHealth : null;
        m_LivesRemaining = m_DiffConfig.maxLives;
        m_PlayerHealth = m_DiffConfig.playerMaxHealth;
-        m_PlayerDeathTracked = false;
+       m_PlayerDeathTracked = false;
+        m_HealthCriticalAnnounced = false;
+        m_LastLifeAnnounced = false;
+        m_RocketReadyAnnounced = false;
+        m_RespawnCuePending = false;
+        m_NextWaveVoiceWave = -1;
+        m_TwoMinuteWarningAnnounced = false;
+        m_OneMinuteWarningAnnounced = false;
+        m_TenSecondWarningAnnounced = false;
+        m_Score1000Announced = false;
+        m_Score5000Announced = false;
+        m_Score10000Announced = false;
+        m_RespawnCueTime = 0f;
+        m_AnnouncedHunters.Clear();
+        m_AnnouncedRetreatingRobots.Clear();
         m_ScoreManager.Reset();
         m_TimerManager = new TimerManager(IsTestMode(mode) || mode == Mode.AIBattle ? 5f : 20f);
         m_StartupGraceTimer = StartupGracePeriod;
@@ -621,7 +706,382 @@ public class SinglePlayerGameLoop : Game.IGameLoop
 
     Vector3 ResolveRobotSpawnPosition(Vector3 position)
     {
-        return position;
+        var selectedPosition = SelectRobotSpawnPosition();
+        if (selectedPosition.HasValue)
+            return selectedPosition.Value;
+
+        return ResolveGroundedRobotSpawnPosition(position);
+    }
+
+    void EnsureRobotSpawnGraph()
+    {
+        if (m_RobotSpawnGraphBuilt)
+            return;
+
+        m_RobotSpawnGraphBuilt = true;
+        var center = GetRobotSpawnCenter();
+        var groundedCenterPositions = ResolveGroundedRobotSpawnPositions(center);
+        var centerPosition = center;
+        var closestCenterHeight = float.MaxValue;
+        foreach (var groundedPosition in groundedCenterPositions)
+        {
+            var heightDifference = Mathf.Abs(groundedPosition.y - center.y);
+            if (heightDifference < closestCenterHeight)
+            {
+                closestCenterHeight = heightDifference;
+                centerPosition = groundedPosition;
+            }
+        }
+
+        if (m_HighRobotSpawnY == float.MinValue)
+            m_HighRobotSpawnY = centerPosition.y;
+
+        var centerNodeIndex = AddRobotSpawnNode(centerPosition);
+        var sampleSteps = Mathf.RoundToInt(RobotSpawnScanRadius / RobotSpawnScanSpacing);
+        for (var sampleX = -sampleSteps; sampleX <= sampleSteps; sampleX++)
+        {
+            for (var sampleZ = -sampleSteps; sampleZ <= sampleSteps; sampleZ++)
+            {
+                var flatDistance = Mathf.Sqrt(sampleX * sampleX + sampleZ * sampleZ) * RobotSpawnScanSpacing;
+                if (flatDistance > RobotSpawnScanRadius)
+                    continue;
+
+                var sample = center + new Vector3(sampleX * RobotSpawnScanSpacing, 0f, sampleZ * RobotSpawnScanSpacing);
+                sample.y = centerPosition.y;
+                foreach (var groundedPosition in ResolveGroundedRobotSpawnPositions(sample))
+                    AddRobotSpawnNode(groundedPosition);
+            }
+        }
+
+        ConnectRobotSpawnNodes();
+        MarkRobotSpawnReachability(centerNodeIndex);
+
+        var highCount = 0;
+        var lowCount = 0;
+        var rawHighCount = 0;
+        var rawLowCount = 0;
+        var rawOtherCount = 0;
+        var edgeCount = 0;
+        foreach (var node in m_RobotSpawnNodes)
+        {
+            if (node.tier == RobotSpawnTier.High)
+                rawHighCount++;
+            else if (node.tier == RobotSpawnTier.Low)
+            {
+                rawLowCount++;
+                if (m_DeveloperSelfTest)
+                    GameDebug.Log($"Robot low node {node.position} forward:{node.reachableFromCenter} back:{node.canReachCenter} next:{node.nextNodes.Count} prev:{node.previousNodes.Count}");
+            }
+            else
+                rawOtherCount++;
+
+            edgeCount += node.nextNodes.Count;
+            if (!node.reachableFromCenter)
+                continue;
+            if (node.tier == RobotSpawnTier.High)
+                highCount++;
+            else if (node.tier == RobotSpawnTier.Low)
+                lowCount++;
+        }
+
+        GameDebug.Log($"Robot spawn graph built nodes:{m_RobotSpawnNodes.Count} edges:{edgeCount} raw-high:{rawHighCount} raw-low:{rawLowCount} raw-other:{rawOtherCount} reachable-high:{highCount} reachable-low:{lowCount} highY:{m_HighRobotSpawnY:F1}");
+    }
+
+    int AddRobotSpawnNode(Vector3 position)
+    {
+        if (position.y > m_HighRobotSpawnY + 3.5f)
+            return -1;
+
+        if (!IsClearRobotSpawnPosition(position))
+            return -1;
+
+        var key = Vector3Int.RoundToInt(position * 2f);
+        for (var index = 0; index < m_RobotSpawnNodes.Count; index++)
+        {
+            if (Vector3Int.RoundToInt(m_RobotSpawnNodes[index].position * 2f) == key)
+                return index;
+        }
+
+        m_RobotSpawnNodes.Add(new RobotSpawnNode
+        {
+            position = position,
+            tier = GetRobotSpawnTier(position)
+        });
+        return m_RobotSpawnNodes.Count - 1;
+    }
+
+    void ConnectRobotSpawnNodes()
+    {
+        var cellSize = 4f;
+        var buckets = new Dictionary<Vector2Int, List<int>>();
+        for (var index = 0; index < m_RobotSpawnNodes.Count; index++)
+        {
+            var position = m_RobotSpawnNodes[index].position;
+            var cell = new Vector2Int(
+                Mathf.FloorToInt(position.x / cellSize),
+                Mathf.FloorToInt(position.z / cellSize));
+            if (!buckets.TryGetValue(cell, out var bucket))
+            {
+                bucket = new List<int>();
+                buckets.Add(cell, bucket);
+            }
+            bucket.Add(index);
+        }
+
+        for (var index = 0; index < m_RobotSpawnNodes.Count; index++)
+        {
+            var node = m_RobotSpawnNodes[index];
+            var cell = new Vector2Int(
+                Mathf.FloorToInt(node.position.x / cellSize),
+                Mathf.FloorToInt(node.position.z / cellSize));
+            for (var offsetX = -1; offsetX <= 1; offsetX++)
+            {
+                for (var offsetZ = -1; offsetZ <= 1; offsetZ++)
+                {
+                    if (!buckets.TryGetValue(new Vector2Int(cell.x + offsetX, cell.y + offsetZ), out var bucket))
+                        continue;
+
+                    foreach (var neighborIndex in bucket)
+                    {
+                        if (neighborIndex == index || node.nextNodes.Contains(neighborIndex))
+                            continue;
+
+                        var neighbor = m_RobotSpawnNodes[neighborIndex];
+                        var flatDistance = Vector2.Distance(
+                            new Vector2(node.position.x, node.position.z),
+                            new Vector2(neighbor.position.x, neighbor.position.z));
+                        if (flatDistance > 4.2f)
+                            continue;
+
+                        var heightChange = neighbor.position.y - node.position.y;
+                        if (heightChange > 2.5f || heightChange < -8f)
+                            continue;
+
+                        if (!HasClearRobotSpawnSegment(node.position, neighbor.position))
+                            continue;
+
+                        node.nextNodes.Add(neighborIndex);
+                        neighbor.previousNodes.Add(index);
+                    }
+                }
+            }
+        }
+    }
+
+    void MarkRobotSpawnReachability(int centerNodeIndex)
+    {
+        if (centerNodeIndex < 0 || centerNodeIndex >= m_RobotSpawnNodes.Count)
+            return;
+
+        var forwardQueue = new Queue<int>();
+        forwardQueue.Enqueue(centerNodeIndex);
+        m_RobotSpawnNodes[centerNodeIndex].canReachCenter = true;
+        while (forwardQueue.Count > 0)
+        {
+            var node = m_RobotSpawnNodes[forwardQueue.Dequeue()];
+            foreach (var nextIndex in node.nextNodes)
+            {
+                if (m_RobotSpawnNodes[nextIndex].reachableFromCenter)
+                    continue;
+                m_RobotSpawnNodes[nextIndex].reachableFromCenter = true;
+                forwardQueue.Enqueue(nextIndex);
+            }
+        }
+
+        var reverseQueue = new Queue<int>();
+        reverseQueue.Enqueue(centerNodeIndex);
+        while (reverseQueue.Count > 0)
+        {
+            var nodeIndex = reverseQueue.Dequeue();
+            foreach (var previousIndex in m_RobotSpawnNodes[nodeIndex].previousNodes)
+            {
+                if (m_RobotSpawnNodes[previousIndex].canReachCenter)
+                    continue;
+                m_RobotSpawnNodes[previousIndex].canReachCenter = true;
+                reverseQueue.Enqueue(previousIndex);
+            }
+        }
+    }
+
+    bool HasClearRobotSpawnSegment(Vector3 from, Vector3 to)
+    {
+        var fromPoint = from + Vector3.up * 1.2f;
+        var toPoint = to + Vector3.up * 1.2f;
+        var direction = toPoint - fromPoint;
+        var distance = direction.magnitude;
+        if (distance < 0.1f)
+            return true;
+
+        var hits = Physics.RaycastAll(fromPoint, direction / distance, distance,
+            CombatLayers.CombatRaycastMask, QueryTriggerInteraction.Ignore);
+        foreach (var hit in hits)
+        {
+            if (hit.collider == null ||
+                hit.collider.GetComponentInParent<Character>() != null ||
+                hit.collider.GetComponentInParent<HitCollision>() != null)
+                continue;
+
+            if (hit.normal.y >= 0.5f)
+                continue;
+
+            if (hit.distance < distance - 0.2f)
+                return false;
+        }
+
+        return true;
+    }
+
+    Vector3? SelectRobotSpawnPosition()
+    {
+        EnsureRobotSpawnGraph();
+        var preferredTier = GetPreferredRobotSpawnTier();
+        var preferredNodes = GetRobotSpawnNodes(preferredTier);
+        var selected = SelectSpreadRobotSpawnNode(preferredNodes, true) ??
+            SelectSpreadRobotSpawnNode(preferredNodes, false);
+
+        if (!selected.HasValue)
+        {
+            var alternateTier = preferredTier == RobotSpawnTier.High
+                ? RobotSpawnTier.Low
+                : RobotSpawnTier.High;
+            var alternateNodes = GetRobotSpawnNodes(alternateTier);
+            selected = SelectSpreadRobotSpawnNode(alternateNodes, true) ??
+                SelectSpreadRobotSpawnNode(alternateNodes, false);
+        }
+
+        if (!selected.HasValue)
+            return null;
+
+        if (m_RecentRobotSpawnPositions.Count >= 7)
+            m_RecentRobotSpawnPositions.RemoveAt(0);
+        m_RecentRobotSpawnPositions.Add(selected.Value);
+
+        var selectedTier = GetRobotSpawnTier(selected.Value);
+        if (selectedTier == m_LastRobotSpawnTier)
+            m_SameRobotSpawnTierCount++;
+        else
+            m_SameRobotSpawnTierCount = 1;
+        m_LastRobotSpawnTier = selectedTier;
+
+        return selected.Value;
+    }
+
+    RobotSpawnTier GetPreferredRobotSpawnTier()
+    {
+        if (m_LastRobotSpawnTier != RobotSpawnTier.Other && m_SameRobotSpawnTierCount >= 2)
+            return m_LastRobotSpawnTier == RobotSpawnTier.High
+                ? RobotSpawnTier.Low
+                : RobotSpawnTier.High;
+
+        return UnityEngine.Random.value < 0.5f
+            ? RobotSpawnTier.Low
+            : RobotSpawnTier.High;
+    }
+
+    List<Vector3> GetRobotSpawnNodes(RobotSpawnTier tier)
+    {
+        var positions = new List<Vector3>();
+        foreach (var node in m_RobotSpawnNodes)
+        {
+            if (node.reachableFromCenter && node.tier == tier)
+                positions.Add(node.position);
+        }
+
+        return positions;
+    }
+
+    Vector3? SelectSpreadRobotSpawnNode(List<Vector3> candidates, bool requireSpacing)
+    {
+        var valid = new List<Vector3>();
+        foreach (var candidate in candidates)
+        {
+            if (!requireSpacing || IsFarFromRecentRobotSpawns(candidate))
+                valid.Add(candidate);
+        }
+
+        if (valid.Count == 0)
+            return null;
+
+        return valid[UnityEngine.Random.Range(0, valid.Count)];
+    }
+
+    RobotSpawnTier GetRobotSpawnTier(Vector3 position)
+    {
+        if (Mathf.Abs(position.y - m_HighRobotSpawnY) <= 3.5f)
+            return RobotSpawnTier.High;
+
+        if (position.y <= m_HighRobotSpawnY - 8f)
+            return RobotSpawnTier.Low;
+
+        return RobotSpawnTier.Other;
+    }
+
+    string GetRobotSpawnTierName(Vector3 position)
+    {
+        var tier = GetRobotSpawnTier(position);
+        return tier == RobotSpawnTier.High ? "high"
+            : tier == RobotSpawnTier.Low ? "low"
+            : "fallback";
+    }
+
+    bool IsFarFromRecentRobotSpawns(Vector3 position)
+    {
+        foreach (var recentPosition in m_RecentRobotSpawnPositions)
+        {
+            if ((recentPosition - position).sqrMagnitude < 6f * 6f)
+                return false;
+        }
+
+        return true;
+    }
+
+    Vector3 ResolveGroundedRobotSpawnPosition(Vector3 position)
+    {
+        var positions = ResolveGroundedRobotSpawnPositions(position);
+        return positions.Count > 0
+            ? positions[UnityEngine.Random.Range(0, positions.Count)]
+            : position;
+    }
+
+    System.Collections.Generic.List<Vector3> ResolveGroundedRobotSpawnPositions(Vector3 position)
+    {
+        var origin = position + Vector3.up * 50f;
+        var hits = Physics.RaycastAll(origin, Vector3.down, 100f,
+            CombatLayers.GroundMask, QueryTriggerInteraction.Ignore);
+
+        var validHits = new System.Collections.Generic.List<RaycastHit>();
+        foreach (var hit in hits)
+        {
+            if (hit.collider == null || hit.collider.GetComponentInParent<Character>() != null)
+                continue;
+
+            if (hit.normal.y < 0.6f)
+                continue;
+
+            var visibleSurface = hit.collider is TerrainCollider ||
+                hit.collider.GetComponentInParent<Renderer>() != null;
+            if (!visibleSurface)
+                continue;
+
+            validHits.Add(hit);
+        }
+
+        return validHits.Select(hit => hit.point + Vector3.up * 0.2f).ToList();
+    }
+
+    Vector3 GetRobotSpawnCenter()
+    {
+        return m_SpawnCenter != Vector3.zero
+            ? m_SpawnCenter
+            : GetPlayerPosition();
+    }
+
+    static bool IsClearRobotSpawnPosition(Vector3 position)
+    {
+        var capsuleBottom = position + new Vector3(0f, 0.58f, 0f);
+        var capsuleTop = position + new Vector3(0f, 1.78f, 0f);
+        return !Physics.CheckCapsule(capsuleBottom, capsuleTop, 0.5f,
+            CombatLayers.CombatRaycastMask, QueryTriggerInteraction.Ignore);
     }
 
     void OnPlayerHit(float damage)
@@ -629,6 +1089,8 @@ public class SinglePlayerGameLoop : Game.IGameLoop
         if (m_ShieldMultiplier < 1f) damage *= 0.5f;
         m_PlayerHealth -= damage;
         GameDebug.Log($"Player hit! -{damage} HP:{m_PlayerHealth:F0}");
+        m_HudUI.AnnounceCue("PlayerDamaged");
+        CheckHealthCritical();
 
        if (m_PlayerHealth <= 0)
        {
@@ -640,6 +1102,8 @@ public class SinglePlayerGameLoop : Game.IGameLoop
                m_LivesRemaining--;
                if (m_LivesRemaining <= 0)
                    OnGameOver("Out of lives!");
+               else
+                   AnnouncePlayerDown();
            }
            GameDebug.Log("Player down! Lives remaining: " + m_LivesRemaining + ". Respawning...");
        }
@@ -647,12 +1111,30 @@ public class SinglePlayerGameLoop : Game.IGameLoop
         {
             // Passive health regen
             m_PlayerHealth = Mathf.Min(m_PlayerHealth + m_DiffConfig.playerHealthRegen * Time.deltaTime, m_DiffConfig.playerMaxHealth);
+            if (m_PlayerHealth > m_DiffConfig.playerMaxHealth * 0.3f)
+                m_HealthCriticalAnnounced = false;
         }
     }
 
     int GetPlayerVisualHealth()
     {
         return Mathf.CeilToInt(m_PlayerHealth);
+    }
+
+    float GetPlayerDisplayHealth()
+    {
+        if (m_Player != null && m_Player.controlledEntity != Entity.Null)
+        {
+            var entityManager = m_GameWorld.GetEntityManager();
+            if (entityManager.Exists(m_Player.controlledEntity) &&
+                entityManager.HasComponent<HealthStateData>(m_Player.controlledEntity))
+            {
+                var entityHealth = entityManager.GetComponentData<HealthStateData>(m_Player.controlledEntity).health;
+                return Mathf.Min(m_PlayerHealth, entityHealth);
+            }
+        }
+
+        return m_PlayerHealth;
     }
 
     void UpdatePlayerLives()
@@ -676,6 +1158,10 @@ public class SinglePlayerGameLoop : Game.IGameLoop
             if (m_LivesRemaining <= 0)
             {
                 OnGameOver("Out of lives!");
+            }
+            else
+            {
+                AnnouncePlayerDown();
             }
         }
         else
@@ -725,6 +1211,189 @@ public class SinglePlayerGameLoop : Game.IGameLoop
         GameDebug.Log($"GAME OVER! {reason}");
         GameDebug.Log($"Score: {m_ScoreManager.totalScore} | Kills: {m_ScoreManager.killCount} | Max Combo: x{m_ScoreManager.maxCombo}");
         GameDebug.Log("Press 'chris' in console to play again, or 'boot' to return to menu.");
+    }
+
+    void AnnouncePlayerDown()
+    {
+        m_HudUI.AnnounceCue("PlayerDown");
+        m_HealthCriticalAnnounced = false;
+        m_RespawnCuePending = true;
+        m_RespawnCueTime = Time.time + 1f;
+        if (m_LivesRemaining == 1 && !m_LastLifeAnnounced)
+        {
+            m_LastLifeAnnounced = true;
+            m_HudUI.AnnounceCue("LastLife");
+        }
+    }
+
+    void CheckHealthCritical()
+    {
+        if (m_DiffConfig == null || m_PlayerHealth <= 0f ||
+            m_PlayerHealth > m_DiffConfig.playerMaxHealth * 0.25f)
+            return;
+
+        if (!m_HealthCriticalAnnounced)
+        {
+            m_HealthCriticalAnnounced = true;
+            m_HudUI.AnnounceCue("HealthCritical");
+        }
+    }
+
+    void CheckSurvivalVoice()
+    {
+        if (!m_GameplayStarted || m_GameOver || m_DiffConfig == null)
+            return;
+
+        if (m_RespawnCuePending && Time.time >= m_RespawnCueTime)
+        {
+            m_RespawnCuePending = false;
+            m_HudUI.AnnounceCue("RespawnReady");
+        }
+
+        if (m_PlayerHealth <= m_DiffConfig.playerMaxHealth * 0.25f && m_PlayerHealth > 0f)
+            CheckHealthCritical();
+        else if (m_PlayerHealth > m_DiffConfig.playerMaxHealth * 0.3f)
+            m_HealthCriticalAnnounced = false;
+    }
+
+    void OnAutoRifleStateChanged(Ability_AutoRifle.State previousAction, Ability_AutoRifle.State currentAction,
+        int previousAmmo, int currentAmmo, int clipSize)
+    {
+        if (!m_GameplayStarted || m_GameOver || previousAmmo == currentAmmo)
+            return;
+
+        if (currentAmmo == 0)
+            m_HudUI.AnnounceCue("AmmoEmpty");
+        else if (currentAmmo <= Mathf.Max(1, clipSize / 4))
+            m_HudUI.AnnounceCue("AmmoLow");
+    }
+
+    void OnWeaponReloadStarted()
+    {
+    }
+
+    void OnWeaponReloadCompleted()
+    {
+        if (m_GameplayStarted && !m_GameOver)
+            m_HudUI.AnnounceCue("Reloaded");
+    }
+
+    void OnScopeChanged(bool scoped)
+    {
+        if (m_GameplayStarted && !m_GameOver && scoped)
+            m_HudUI.AnnounceCue("SniperScoped");
+    }
+
+    void CheckComboMilestones()
+    {
+        if (!m_GameplayStarted || m_GameOver)
+            return;
+
+        if (m_ScoreManager.currentCombo == 3)
+            m_HudUI.AnnounceCue("Combo3");
+        else if (m_ScoreManager.currentCombo == 5)
+            m_HudUI.AnnounceCue("Combo5");
+    }
+
+    void CheckComboBroken(float deltaTime)
+    {
+        if (!m_GameplayStarted || m_GameOver)
+            return;
+
+        if (m_ScoreManager.currentCombo >= 3 && m_ScoreManager.comboTimer > 0f &&
+            m_ScoreManager.comboTimer <= deltaTime)
+            m_HudUI.AnnounceCue("ComboBroken");
+    }
+
+    void CheckNextWaveVoice()
+    {
+        if (m_WaveManager == null || !m_GameplayStarted || m_GameOver)
+            return;
+
+        if (m_WaveManager.currentWave <= m_NextWaveVoiceWave || !m_WaveManager.isWaveActive ||
+            m_WaveManager.waveBreakTimer <= 0f || m_WaveManager.waveBreakTimer > 5f)
+            return;
+
+        m_NextWaveVoiceWave = m_WaveManager.currentWave;
+        m_HudUI.AnnounceCue("NextWaveInFive");
+    }
+
+    void CheckScoreMilestones()
+    {
+        if (!m_GameplayStarted || m_GameOver)
+            return;
+
+        if (!m_Score1000Announced && m_ScoreManager.totalScore >= 1000)
+        {
+            m_Score1000Announced = true;
+            m_HudUI.AnnounceCue("Score1000");
+        }
+        if (!m_Score5000Announced && m_ScoreManager.totalScore >= 5000)
+        {
+            m_Score5000Announced = true;
+            m_HudUI.AnnounceCue("Score5000");
+        }
+        if (!m_Score10000Announced && m_ScoreManager.totalScore >= 10000)
+        {
+            m_Score10000Announced = true;
+            m_HudUI.AnnounceCue("Score10000");
+        }
+    }
+
+    void CheckTimeWarnings()
+    {
+        if (!m_GameplayStarted || m_GameOver || m_TimerManager == null)
+            return;
+
+        if (!m_TwoMinuteWarningAnnounced && m_TimerManager.remainingTime <= 120f)
+        {
+            m_TwoMinuteWarningAnnounced = true;
+            m_HudUI.AnnounceCue("TwoMinuteWarning");
+        }
+        if (!m_OneMinuteWarningAnnounced && m_TimerManager.remainingTime <= 60f)
+        {
+            m_OneMinuteWarningAnnounced = true;
+            m_HudUI.AnnounceCue("OneMinuteWarning");
+        }
+        if (!m_TenSecondWarningAnnounced && m_TimerManager.remainingTime <= 10f)
+        {
+            m_TenSecondWarningAnnounced = true;
+            m_HudUI.AnnounceCue("TenSecondCountdown");
+        }
+    }
+
+    void CheckRobotTactics(List<AIController> robots)
+    {
+        if (!m_GameplayStarted || m_GameOver || robots == null)
+            return;
+
+        for (var index = 0; index < robots.Count; index++)
+        {
+            var robot = robots[index];
+            if (robot == null || !robot.isAlive)
+                continue;
+
+            if (robot.robotType == RobotType.A2_Hunter && robot.state == AIState.Attack &&
+                m_AnnouncedHunters.Add(robot))
+                m_HudUI.AnnounceCue("A2HunterDetected");
+
+            if (robot.robotType == RobotType.A3_Tactician && robot.isRetreating &&
+                m_AnnouncedRetreatingRobots.Add(robot))
+                m_HudUI.AnnounceCue("A3Retreating");
+        }
+    }
+
+    void CheckRemainingEnemies(int remainingEnemies)
+    {
+        if (!m_GameplayStarted || m_GameOver || remainingEnemies <= 0)
+            return;
+
+        if (remainingEnemies == 1)
+            m_HudUI.AnnounceCue("LastEnemy");
+        else if (remainingEnemies == 3)
+            m_HudUI.AnnounceCue("ThreeEnemiesRemaining");
+        else if (remainingEnemies == 5)
+            m_HudUI.AnnounceCue("FiveEnemiesRemaining");
     }
 
     public void FixedUpdate() { }
@@ -814,8 +1483,8 @@ public class SinglePlayerGameLoop : Game.IGameLoop
             var twistSystemHandle = m_TwistSystem.Schedule();
             m_FanSystem.Schedule(twistSystemHandle);
 
-            m_HitCollisionModule.StoreColliderState();
             m_CharacterModule.LateUpdate();
+            m_HitCollisionModule.StoreColliderState();
             m_ItemModule.LateUpdate();
             m_ragdollModule.LateUpdate();
             m_ProjectileModule.UpdateClientProjectilesPredicted();
@@ -856,14 +1525,23 @@ public class SinglePlayerGameLoop : Game.IGameLoop
             m_CharacterModule.ToggleThirdPerson();
 
         bool commandWasConsumed = false;
-        while (Game.frameTime > m_GameWorld.nextTickTime)
+        const int maxSimulationTicksPerFrame = 3;
+        var simulationTicksThisFrame = 0;
+        while (Game.frameTime > m_GameWorld.nextTickTime &&
+            simulationTicksThisFrame < maxSimulationTicksPerFrame)
         {
             gameTime.tick++;
             gameTime.tickDuration = gameTime.tickInterval;
             commandWasConsumed = true;
+            simulationTicksThisFrame++;
             SinglePlayerTickUpdate();
             m_GameWorld.nextTickTime += m_GameWorld.worldTime.tickInterval;
         }
+
+        if (simulationTicksThisFrame == maxSimulationTicksPerFrame &&
+            Game.frameTime > m_GameWorld.nextTickTime)
+            m_GameWorld.nextTickTime = Game.frameTime;
+
         if (commandWasConsumed)
             m_PlayerModuleClient.ResetInput(userInputEnabled);
     }
@@ -992,9 +1670,21 @@ public class SinglePlayerGameLoop : Game.IGameLoop
         GameDebug.Log($"Score: {m_ScoreManager.totalScore} | Kills: {m_ScoreManager.killCount} | Combo: x{m_ScoreManager.currentCombo} | Time: {m_TimerManager.GetFormattedTime()}");
     }
 
+    void CmdVoiceAll(string[] args)
+    {
+        m_HudUI.AnnounceTestSequence();
+    }
+
     void UpdateRocketLauncher()
     {
         if (m_Player == null || m_Player.controlledEntity == Entity.Null) return;
+
+        if (!m_RocketReadyAnnounced && m_rocketLastFireTime > 0f && m_GameplayStarted && !m_GameOver &&
+            Time.time - m_rocketLastFireTime >= 2f)
+        {
+            m_RocketReadyAnnounced = true;
+            m_HudUI.AnnounceCue("RocketReady");
+        }
 
         if (m_RocketScoreLogTime > 0f && Time.time >= m_RocketScoreLogTime)
         {
@@ -1038,6 +1728,7 @@ public class SinglePlayerGameLoop : Game.IGameLoop
             m_RocketPendingAttempts++;
             m_RocketNextAttemptTime = Time.time + 4f;
             m_rocketLastFireTime = Time.time;
+            m_RocketReadyAnnounced = false;
             GameDebug.Log($"Rocket test attempt {m_RocketPendingAttempts} (aimNearest:{m_RocketAimNearest}).");
             m_RocketShotSchedule = new float[] { 0.12f, 0.3f, 0.6f, 1.0f, 1.5f };
             m_RocketShotBaseTime = Time.time;
@@ -1050,6 +1741,7 @@ public class SinglePlayerGameLoop : Game.IGameLoop
         if (Time.time - m_rocketLastFireTime < 2.0f) return;
 
         m_rocketLastFireTime = Time.time;
+        m_RocketReadyAnnounced = false;
         GameDebug.Log("Rocket launcher fired via Q key.");
         FireRocket(false);
     }

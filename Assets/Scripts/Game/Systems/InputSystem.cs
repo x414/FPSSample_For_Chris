@@ -3,7 +3,7 @@
 public class InputSystem
 {
     // TODO: these should be put in some global setting
-    public static Vector2 s_JoystickLookSensitivity = new Vector2(90.0f, 60.0f);
+    public static Vector2 s_JoystickLookSensitivity = new Vector2(45.0f, 30.0f);
 
     static float maxMoveYaw;
     static float maxMoveMagnitude;
@@ -12,6 +12,11 @@ public class InputSystem
     {
         // To accumulate move we store the input with max magnitude and uses that
         Vector2 moveInput = new Vector2(Game.Input.GetAxisRaw("Horizontal"), Game.Input.GetAxisRaw("Vertical"));
+        var leftStickInput = new Vector2(
+            Game.Input.GetAxisRaw("LeftStickX"),
+            Game.Input.GetAxisRaw("LeftStickY"));
+        if (leftStickInput.sqrMagnitude > 0.0001f)
+            moveInput = leftStickInput;
         float angle = Vector2.Angle(Vector2.up, moveInput);
         if (moveInput.x < 0)
             angle = 360 - angle;
@@ -45,7 +50,7 @@ public class InputSystem
         command.buttons.Or(UserCommand.Button.Boost,Game.Input.GetKey(KeyCode.LeftControl) || Game.Input.GetKey(KeyCode.Joystick1Button4));
         command.buttons.Or(UserCommand.Button.PrimaryFire, (Game.Input.GetMouseButton(0) && Game.GetMousePointerLock()) || (Game.Input.GetAxisRaw("Trigger") < -0.5f));
 		command.buttons.Or(UserCommand.Button.SecondaryFire, Game.Input.GetMouseButton(1) || Game.Input.GetKey(KeyCode.Joystick1Button5)); 
-        command.buttons.Or(UserCommand.Button.Ability1, Game.Input.GetKey(KeyCode.LeftShift));
+        command.buttons.Or(UserCommand.Button.Ability1, Game.Input.GetKey(KeyCode.LeftShift) || Game.Input.GetKey(KeyCode.Joystick1Button8));
         command.buttons.Or(UserCommand.Button.Ability2, Game.Input.GetKey(KeyCode.E));
         command.buttons.Or(UserCommand.Button.Ability3, Game.Input.GetKey(KeyCode.Q));
         command.buttons.Or(UserCommand.Button.Reload, Game.Input.GetKey(KeyCode.R) || Game.Input.GetKey(KeyCode.Joystick1Button2));

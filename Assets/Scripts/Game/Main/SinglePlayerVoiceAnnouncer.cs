@@ -6,6 +6,57 @@ using UnityEngine;
 
 public class SinglePlayerVoiceAnnouncer : MonoBehaviour
 {
+    public enum VoicePriority
+    {
+        Normal,
+        High,
+        Critical
+    }
+
+    struct VoiceCueDefinition
+    {
+        public VoicePriority Priority;
+        public float Cooldown;
+
+        public VoiceCueDefinition(VoicePriority priority, float cooldown)
+        {
+            Priority = priority;
+            Cooldown = cooldown;
+        }
+    }
+
+    static readonly Dictionary<string, VoiceCueDefinition> CueDefinitions = new Dictionary<string, VoiceCueDefinition>
+    {
+        { "PlayerDamaged", new VoiceCueDefinition(VoicePriority.Normal, 3f) },
+        { "HealthCritical", new VoiceCueDefinition(VoicePriority.Critical, 8f) },
+        { "PlayerDown", new VoiceCueDefinition(VoicePriority.Critical, 3f) },
+        { "LastLife", new VoiceCueDefinition(VoicePriority.Critical, 10f) },
+        { "RespawnReady", new VoiceCueDefinition(VoicePriority.Normal, 4f) },
+        { "AmmoLow", new VoiceCueDefinition(VoicePriority.Normal, 8f) },
+        { "AmmoEmpty", new VoiceCueDefinition(VoicePriority.High, 5f) },
+        { "Reloaded", new VoiceCueDefinition(VoicePriority.Normal, 2f) },
+        { "SniperScoped", new VoiceCueDefinition(VoicePriority.Normal, 5f) },
+        { "RocketReady", new VoiceCueDefinition(VoicePriority.Normal, 5f) },
+        { "EnemyDestroyed", new VoiceCueDefinition(VoicePriority.Normal, 2f) },
+        { "HunterDestroyed", new VoiceCueDefinition(VoicePriority.Normal, 2f) },
+        { "TacticianDestroyed", new VoiceCueDefinition(VoicePriority.Normal, 2f) },
+        { "Combo3", new VoiceCueDefinition(VoicePriority.Normal, 2f) },
+        { "Combo5", new VoiceCueDefinition(VoicePriority.High, 2f) },
+        { "ComboBroken", new VoiceCueDefinition(VoicePriority.Normal, 4f) },
+        { "LastEnemy", new VoiceCueDefinition(VoicePriority.High, 10f) },
+        { "A2HunterDetected", new VoiceCueDefinition(VoicePriority.Normal, 8f) },
+        { "A3Retreating", new VoiceCueDefinition(VoicePriority.Normal, 8f) },
+        { "ThreeEnemiesRemaining", new VoiceCueDefinition(VoicePriority.Normal, 5f) },
+        { "FiveEnemiesRemaining", new VoiceCueDefinition(VoicePriority.Normal, 5f) },
+        { "TwoMinuteWarning", new VoiceCueDefinition(VoicePriority.High, 15f) },
+        { "OneMinuteWarning", new VoiceCueDefinition(VoicePriority.High, 15f) },
+        { "TenSecondCountdown", new VoiceCueDefinition(VoicePriority.Critical, 15f) },
+        { "NextWaveInFive", new VoiceCueDefinition(VoicePriority.Normal, 5f) },
+        { "Score1000", new VoiceCueDefinition(VoicePriority.Normal, 30f) },
+        { "Score5000", new VoiceCueDefinition(VoicePriority.Normal, 30f) },
+        { "Score10000", new VoiceCueDefinition(VoicePriority.Normal, 30f) }
+    };
+
     static readonly string[] NumberNames =
     {
         "Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight",
@@ -14,13 +65,18 @@ public class SinglePlayerVoiceAnnouncer : MonoBehaviour
     };
 
     readonly List<VoiceCue> m_Cues = new List<VoiceCue>();
+    readonly Queue<string> m_PendingCues = new Queue<string>();
+    readonly Dictionary<string, float> m_NextAllowedCueTime = new Dictionary<string, float>();
     readonly List<AudioSource> m_Sources = new List<AudioSource>();
     readonly List<RobotVoiceFilter> m_Filters = new List<RobotVoiceFilter>();
     readonly List<bool> m_OutputLogged = new List<bool>();
     readonly float[] m_OutputBuffer = new float[1024];
+    bool m_PlayingSequence;
+    double m_BusyUntilDspTime;
 
     public void AnnounceWave(int wave, int robotCount)
     {
+        m_PendingCues.Clear();
         m_Cues.Clear();
         Enqueue("Wave", 1f, 0.3f, 0f);
         EnqueueNumber(wave, 0.05f);
@@ -31,9 +87,30 @@ public class SinglePlayerVoiceAnnouncer : MonoBehaviour
 
     public void AnnounceCue(string cue)
     {
-        m_Cues.Clear();
-        Enqueue(cue, 1f, 0.3f, 0f);
-        Schedule();
+        VoiceCueDefinition definition;
+        if (!CueDefinitions.TryGetValue(cue, out definition))
+            definition = new VoiceCueDefinition(VoicePriority.Normal, 1.5f);
+
+        AnnounceCue(cue, definition.Priority, definition.Cooldown);
+    }
+
+    public void AnnounceCue(string cue, VoicePriority priority, float cooldown)
+    {
+        var currentTime = Time.time;
+        float nextAllowedTime;
+        if (m_NextAllowedCueTime.TryGetValue(cue, out nextAllowedTime) && currentTime < nextAllowedTime)
+            return;
+
+        m_NextAllowedCueTime[cue] = currentTime + cooldown;
+        if (priority == VoicePriority.Critical)
+        {
+            m_PendingCues.Clear();
+            PlayCue(cue);
+            return;
+        }
+
+        if (!m_PendingCues.Contains(cue))
+            m_PendingCues.Enqueue(cue);
     }
 
     public void AnnounceGameOver(string reason)
@@ -62,6 +139,7 @@ public class SinglePlayerVoiceAnnouncer : MonoBehaviour
 
     public void AnnounceTestSequence()
     {
+        m_PendingCues.Clear();
         m_Cues.Clear();
         Enqueue("Wave", 1f, 0.3f, 0f);
         Enqueue("One", 1.4f, 0.05f, 0.05f);
@@ -80,6 +158,33 @@ public class SinglePlayerVoiceAnnouncer : MonoBehaviour
         Enqueue("PowerupRapidFire", 1f, 0.3f, 0.5f);
         Enqueue("PowerupTripleScore", 1f, 0.3f, 0.5f);
         Enqueue("PowerupMagnet", 1f, 0.3f, 0.5f);
+        Enqueue("HealthCritical", 1f, 0.3f, 0.5f);
+        Enqueue("PlayerDown", 1f, 0.3f, 0.5f);
+        Enqueue("LastLife", 1f, 0.3f, 0.5f);
+        Enqueue("RespawnReady", 1f, 0.3f, 0.5f);
+        Enqueue("AmmoLow", 1f, 0.3f, 0.5f);
+        Enqueue("AmmoEmpty", 1f, 0.3f, 0.5f);
+        Enqueue("Reloaded", 1f, 0.3f, 0.5f);
+        Enqueue("SniperScoped", 1f, 0.3f, 0.5f);
+        Enqueue("RocketReady", 1f, 0.3f, 0.5f);
+        Enqueue("EnemyDestroyed", 1f, 0.3f, 0.5f);
+        Enqueue("HunterDestroyed", 1f, 0.3f, 0.5f);
+        Enqueue("TacticianDestroyed", 1f, 0.3f, 0.5f);
+        Enqueue("Combo3", 1f, 0.3f, 0.5f);
+        Enqueue("Combo5", 1f, 0.3f, 0.5f);
+        Enqueue("ComboBroken", 1f, 0.3f, 0.5f);
+        Enqueue("LastEnemy", 1f, 0.3f, 0.5f);
+        Enqueue("A2HunterDetected", 1f, 0.3f, 0.5f);
+        Enqueue("A3Retreating", 1f, 0.3f, 0.5f);
+        Enqueue("ThreeEnemiesRemaining", 1f, 0.3f, 0.5f);
+        Enqueue("FiveEnemiesRemaining", 1f, 0.3f, 0.5f);
+        Enqueue("TwoMinuteWarning", 1f, 0.3f, 0.5f);
+        Enqueue("OneMinuteWarning", 1f, 0.3f, 0.5f);
+        Enqueue("TenSecondCountdown", 1f, 0.3f, 0.5f);
+        Enqueue("NextWaveInFive", 1f, 0.3f, 0.5f);
+        Enqueue("Score1000", 1f, 0.3f, 0.5f);
+        Enqueue("Score5000", 1f, 0.3f, 0.5f);
+        Enqueue("Score10000", 1f, 0.3f, 0.5f);
         Schedule();
     }
 
@@ -87,6 +192,8 @@ public class SinglePlayerVoiceAnnouncer : MonoBehaviour
     {
         StopSources();
         m_Cues.Clear();
+        m_PendingCues.Clear();
+        m_PlayingSequence = false;
     }
 
     struct VoiceCue
@@ -200,6 +307,9 @@ public class SinglePlayerVoiceAnnouncer : MonoBehaviour
 
             scheduledTime += cue.Clip.length / source.pitch;
         }
+
+        m_PlayingSequence = true;
+        m_BusyUntilDspTime = scheduledTime;
     }
 
     void Update()
@@ -218,7 +328,42 @@ public class SinglePlayerVoiceAnnouncer : MonoBehaviour
             {
                 GameDebug.Log($"Voice output {m_Cues[index].Clip.name} peak={peak:0.000}");
                 m_OutputLogged[index] = true;
+        }
+        }
+
+        if (!m_PlayingSequence || AudioSettings.dspTime < m_BusyUntilDspTime)
+            return;
+
+        var anyPlaying = false;
+        for (var index = 0; index < m_Sources.Count; index++)
+        {
+            if (m_Sources[index].isPlaying)
+            {
+                anyPlaying = true;
+                break;
             }
         }
+
+        if (!anyPlaying)
+        {
+            m_Cues.Clear();
+            m_PlayingSequence = false;
+        }
+    }
+
+    void LateUpdate()
+    {
+        if (m_PlayingSequence || m_PendingCues.Count == 0)
+            return;
+
+        PlayCue(m_PendingCues.Dequeue());
+    }
+
+    void PlayCue(string cue)
+    {
+        m_Cues.Clear();
+        Enqueue(cue, 1f, 0.3f, 0f);
+        if (m_Cues.Count > 0)
+            Schedule();
     }
 }

@@ -53,6 +53,7 @@ public class RaySphereQueryReciever : BaseComponentSystem
 	public class QueryData
 	{
 		public Query query;
+		public float originalDistance;
 		public QueryResult result;
 
 
@@ -77,10 +78,6 @@ public class RaySphereQueryReciever : BaseComponentSystem
 	private List<int> m_incommingQueryIds = new List<int>(128);
 
 //	readonly RaycastHit[] raycastHitBuffer = new RaycastHit[128];
-	readonly int m_defaultLayer;
-	readonly int m_detailLayer;
-	readonly int m_teamAreaALayer;
-	readonly int m_teamAreaBLayer;
 	readonly int m_environmentMask;
 	readonly int m_hitCollisionLayer;
 
@@ -90,13 +87,8 @@ public class RaySphereQueryReciever : BaseComponentSystem
 	
 	public RaySphereQueryReciever(GameWorld world) : base(world) 
 	{
-		m_defaultLayer = LayerMask.NameToLayer("Default");
-		m_detailLayer = LayerMask.NameToLayer("collision_detail");
-		m_teamAreaALayer = LayerMask.NameToLayer("TeamAreaA");
-		m_teamAreaBLayer = LayerMask.NameToLayer("TeamAreaB");
 		m_hitCollisionLayer = LayerMask.NameToLayer("hitcollision_enabled");
-		m_environmentMask = 1 << m_defaultLayer | 1 << m_detailLayer | 1 << m_teamAreaALayer | 1 << m_teamAreaBLayer 
-		                    | 1 << m_hitCollisionLayer;
+		m_environmentMask = CombatLayers.CombatRaycastMask;
 	}
 	
 	protected override void OnCreateManager()
@@ -126,6 +118,7 @@ public class RaySphereQueryReciever : BaseComponentSystem
 //		GameDebug.Assert(queryData.state == QueryData.State.Idle);
 
 		queryData.query = query;
+		queryData.originalDistance = query.distance;
 		queryData.result = new QueryResult();
 		
 		return queryId;
@@ -206,9 +199,11 @@ public class RaySphereQueryReciever : BaseComponentSystem
 		{
 			var queryId = queryBatch.queryIds[nQuery];
 			var queryData = m_queries[queryId];
+			var query = queryData.query;
 
 			var result = envTestResults[nQuery];
 			var impact = result.collider != null;
+			var skipEnvironmentHit = false;
 
 			// query distance is adjusted so followup tests only are done before environment hit point 
 			if (impact)
@@ -221,13 +216,28 @@ public class RaySphereQueryReciever : BaseComponentSystem
 				queryData.result.hitNormal = result.normal;
 				if (result.collider.gameObject.layer == m_hitCollisionLayer)
 				{
-					var hitCollision = result.collider.GetComponent<HitCollision>();
+					var hitCollision = result.collider.GetComponentInParent<HitCollision>();
 					if (hitCollision != null)
 					{
-						queryData.result.hitCollisionOwner = hitCollision.owner;
+						var owner = hitCollision.owner;
+						if (owner == query.ExcludeOwner || IsCollisionOwnerDisabled(owner))
+						{
+							skipEnvironmentHit = true;
+						}
+						else
+						{
+							queryData.result.hitCollisionOwner = owner;
+						}
 					}
 				}
 			}
+
+			if (skipEnvironmentHit)
+			{
+				queryData.query.distance = queryData.originalDistance;
+				queryData.result = new QueryResult();
+			}
+
 		}
 		Profiler.EndSample();
 		
@@ -339,6 +349,11 @@ public class RaySphereQueryReciever : BaseComponentSystem
 	
 				queryData.result.hitCollisionOwner = hitCollisionData.hitCollisionOwner;
 			}
+
+			if (queryData.result.hitCollisionOwner == Entity.Null)
+			{
+				FallbackToCharacterControllerHit(queryData.query, ref queryData.result);
+			}
 	
 						
 			// TODO (mogensh) keep native arrays for next query
@@ -369,6 +384,86 @@ public class RaySphereQueryReciever : BaseComponentSystem
 		hitColliderFlags.Dispose();
 		
 		Profiler.EndSample();
+	}
+
+	void FallbackToCharacterControllerHit(Query query, ref QueryResult result)
+	{
+		var radius = Mathf.Max(0.2f, query.radius);
+		var hits = Physics.SphereCastAll((Vector3)query.origin, radius, (Vector3)query.direction,
+			query.distance, CombatLayers.CombatRaycastMask, QueryTriggerInteraction.Ignore);
+
+		if (TrySelectCharacterControllerHit(hits, query, ref result))
+			return;
+
+		var rayHits = Physics.RaycastAll((Vector3)query.origin, (Vector3)query.direction,
+			query.distance, CombatLayers.CombatRaycastMask, QueryTriggerInteraction.Ignore);
+		TrySelectCharacterControllerHit(rayHits, query, ref result);
+	}
+
+	bool TrySelectCharacterControllerHit(RaycastHit[] hits, Query query, ref QueryResult result)
+	{
+		var closestDistance = float.MaxValue;
+		var closestIndex = -1;
+		var closestEnvironmentDistance = float.MaxValue;
+		for (var i = 0; i < hits.Length; i++)
+		{
+			var hitCollision = hits[i].collider != null
+				? hits[i].collider.GetComponentInParent<HitCollision>()
+				: null;
+			if (hitCollision == null)
+			{
+				var layerMask = hits[i].collider != null ? 1 << hits[i].collider.gameObject.layer : 0;
+				if ((m_environmentMask & layerMask) != 0 &&
+					(m_hitCollisionLayer < 0 || hits[i].collider.gameObject.layer != m_hitCollisionLayer) &&
+					hits[i].distance < closestEnvironmentDistance)
+				{
+					closestEnvironmentDistance = hits[i].distance;
+				}
+				continue;
+			}
+
+			if (hitCollision.owner == Entity.Null || hitCollision.owner == query.ExcludeOwner)
+				continue;
+
+			if (!EntityManager.Exists(hitCollision.owner) ||
+				!EntityManager.HasComponent<HitCollisionOwnerData>(hitCollision.owner))
+				continue;
+
+			var ownerData = EntityManager.GetComponentData<HitCollisionOwnerData>(hitCollision.owner);
+			if (ownerData.collisionEnabled == 0)
+				continue;
+
+			if (hits[i].distance < closestDistance)
+			{
+				closestDistance = hits[i].distance;
+				closestIndex = i;
+			}
+		}
+
+		if (closestIndex == -1)
+			return false;
+
+		if (closestEnvironmentDistance < closestDistance)
+			return false;
+
+		var closestHit = hits[closestIndex];
+		var closestCollision = closestHit.collider.GetComponentInParent<HitCollision>();
+		if (closestCollision == null)
+			return false;
+
+		result.hit = 1;
+		result.hitCollisionOwner = closestCollision.owner;
+		result.hitPoint = closestHit.point;
+		result.hitNormal = closestHit.normal;
+		return true;
+	}
+
+	bool IsCollisionOwnerDisabled(Entity owner)
+	{
+		return owner == Entity.Null ||
+			!EntityManager.Exists(owner) ||
+			!EntityManager.HasComponent<HitCollisionOwnerData>(owner) ||
+			EntityManager.GetComponentData<HitCollisionOwnerData>(owner).collisionEnabled == 0;
 	}
 
 	protected override void OnUpdate()

@@ -25,6 +25,7 @@ public class ExploreManager
    }
 
     public int totalRobots { get { return m_TotalRobots; } }
+    public List<AIController> activeRobots { get { return m_Robots; } }
 
    List<AIController> m_Robots = new List<AIController>();
    List<RobotSpawnRequest> m_PendingRobots = new List<RobotSpawnRequest>();
@@ -168,13 +169,13 @@ public class ExploreManager
         m_SpawnCooldown = m_Config.robotSpawnCooldown;
     }
 
-    public void Tick(float deltaTime, Vector3 playerPos, System.Action<float> onShootPlayer, GameWorld world)
+    public void Tick(float deltaTime, Vector3 playerPos, GameWorld world)
     {
         for (var i = m_Robots.Count - 1; i >= 0; i--)
         {
             var robot = m_Robots[i];
             robot.UpdateEntity(world);
-            robot.Tick(deltaTime, playerPos, onShootPlayer);
+            robot.Tick(deltaTime, playerPos);
             robot.ApplyCommand(world, world.worldTime.tick);
             if (!robot.isAlive)
             {

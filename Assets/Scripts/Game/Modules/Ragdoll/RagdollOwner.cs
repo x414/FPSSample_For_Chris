@@ -144,6 +144,11 @@ public class UpdateRagdolls : BaseComponentSystem<CharacterPresentationSetup, Ra
     {
         ragdollOwner.ragdollInstance.SetActive(true);
 
+        var ragdollColliders = ragdollOwner.ragdollInstance.GetComponentsInChildren<Collider>(true);
+        var ignoreRaycastLayer = LayerMask.NameToLayer("Ignore Raycast");
+        foreach (var ragdollCollider in ragdollColliders)
+            ragdollCollider.gameObject.layer = ignoreRaycastLayer;
+
         // Setup ragdoll
         var invFrameTime = 1.0f / m_world.frameDuration;
         for (int boneIndex = 0; boneIndex < ragdollOwner.targeteBones.Length; boneIndex++)
